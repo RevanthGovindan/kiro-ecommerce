@@ -4,15 +4,18 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"ecommerce-website/internal/auth"
 	"ecommerce-website/internal/cart"
 	"ecommerce-website/internal/config"
 	"ecommerce-website/internal/database"
+	"ecommerce-website/internal/orders"
 	"ecommerce-website/internal/products"
 	"ecommerce-website/internal/users"
 	"ecommerce-website/pkg/utils"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
@@ -41,6 +44,16 @@ func main() {
 
 	r := gin.Default()
 
+	// Configure CORS middleware
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:3001", "http://192.168.1.5:8080", "http://127.0.0.1:3000", "http://0.0.0.0:3000"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization", "X-Requested-With", "Accept", "Accept-Encoding", "Accept-Language", "Connection", "Host"},
+		ExposeHeaders:    []string{"Content-Length", "Content-Type"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
+
 	// Initialize authentication service
 	authService := auth.NewService(database.GetDB(), cfg)
 	authHandler := auth.NewHandler(authService)
@@ -52,6 +65,10 @@ func main() {
 	// Initialize user service
 	userService := users.NewService(database.GetDB())
 	userHandler := users.NewHandler(userService)
+
+	// Initialize orders service
+	ordersService := orders.NewService(database.GetDB())
+	ordersHandler := orders.NewHandler(ordersService)
 
 	// Setup routes
 	r.GET("/health", func(c *gin.Context) {
@@ -76,6 +93,9 @@ func main() {
 
 	// Setup cart routes
 	cart.RegisterRoutes(api)
+
+	// Setup orders routes
+	orders.SetupRoutes(r, ordersHandler, authService)
 
 	log.Printf("Starting server on port %s", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {

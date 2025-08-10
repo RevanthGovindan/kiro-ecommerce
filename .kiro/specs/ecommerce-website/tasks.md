@@ -45,7 +45,7 @@
   - Write tests for profile management functionality
   - _Requirements: 3.3, 3.4_
 
-- [ ] 7. Implement order creation and management
+- [x] 7. Implement order creation and management
   - Create POST /api/orders/create endpoint for order placement
   - Build order validation logic including inventory checks
   - Implement GET /api/orders/:id for order details retrieval
