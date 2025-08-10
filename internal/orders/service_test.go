@@ -616,11 +616,243 @@ func TestService_GetAllOrders(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			orders, total, err := service.GetAllOrders(tt.page, tt.limit, tt.status)
+			orders, total, err := service.GetAllOrders(tt.page, tt.limit, tt.status, "")
 
 			assert.NoError(t, err)
 			assert.Equal(t, tt.expectedCount, len(orders))
 			assert.Equal(t, tt.expectedTotal, total)
 		})
 	}
+}
+
+func TestService_GetAllCustomers(t *testing.T) {
+	// Use a unique database for this test to avoid interference
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	// Auto migrate the schema
+	err = db.AutoMigrate(
+		&models.User{},
+		&models.Category{},
+		&models.Product{},
+		&models.Order{},
+		&models.OrderItem{},
+	)
+	require.NoError(t, err)
+
+	service := NewService(db)
+
+	// Create test customers
+	customer1 := &models.User{
+		Email:     "john.doe@example.com",
+		Password:  "hashedpassword",
+		FirstName: "John",
+		LastName:  "Doe",
+		Role:      "customer",
+		IsActive:  true,
+	}
+	customer2 := &models.User{
+		Email:     "jane.smith@example.com",
+		Password:  "hashedpassword",
+		FirstName: "Jane",
+		LastName:  "Smith",
+		Role:      "customer",
+		IsActive:  true,
+	}
+	admin := &models.User{
+		Email:     "admin@example.com",
+		Password:  "hashedpassword",
+		FirstName: "Admin",
+		LastName:  "User",
+		Role:      "admin",
+		IsActive:  true,
+	}
+	inactiveCustomer := &models.User{
+		Email:     "inactive@example.com",
+		Password:  "hashedpassword",
+		FirstName: "Inactive",
+		LastName:  "Customer",
+		Role:      "customer",
+		IsActive:  false,
+	}
+
+	require.NoError(t, db.Create(customer1).Error)
+	require.NoError(t, db.Create(customer2).Error)
+	require.NoError(t, db.Create(admin).Error)
+	require.NoError(t, db.Create(inactiveCustomer).Error)
+
+	// Explicitly set inactive customer to false
+	db.Model(inactiveCustomer).Update("is_active", false)
+
+	tests := []struct {
+		name          string
+		page          int
+		limit         int
+		search        string
+		expectedCount int
+		expectedTotal int64
+	}{
+		{
+			name:          "get all customers without search",
+			page:          1,
+			limit:         10,
+			search:        "",
+			expectedCount: 2, // Only active customers, not admin
+			expectedTotal: 2,
+		},
+		{
+			name:          "search by first name",
+			page:          1,
+			limit:         10,
+			search:        "john",
+			expectedCount: 1,
+			expectedTotal: 1,
+		},
+		{
+			name:          "search by last name",
+			page:          1,
+			limit:         10,
+			search:        "smith",
+			expectedCount: 1,
+			expectedTotal: 1,
+		},
+		{
+			name:          "search by email",
+			page:          1,
+			limit:         10,
+			search:        "jane.smith",
+			expectedCount: 1,
+			expectedTotal: 1,
+		},
+		{
+			name:          "no matching customers",
+			page:          1,
+			limit:         10,
+			search:        "nonexistent",
+			expectedCount: 0,
+			expectedTotal: 0,
+		},
+		{
+			name:          "pagination test",
+			page:          1,
+			limit:         1,
+			search:        "",
+			expectedCount: 1,
+			expectedTotal: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			customers, total, err := service.GetAllCustomers(tt.page, tt.limit, tt.search)
+
+			assert.NoError(t, err)
+
+			assert.Equal(t, tt.expectedCount, len(customers))
+			assert.Equal(t, tt.expectedTotal, total)
+
+			// Verify all returned users are customers and active
+			for _, customer := range customers {
+				assert.Equal(t, "customer", customer.Role)
+				assert.True(t, customer.IsActive)
+				assert.Empty(t, customer.Password) // Password should be removed
+			}
+		})
+	}
+}
+
+func TestService_UpdateOrderStatusWithEmailNotification(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create mock email service
+	mockEmailService := &MockEmailService{}
+
+	// Create service with mock dependencies
+	service := NewServiceWithDependencies(db, &MockCartService{}, mockEmailService)
+
+	// Create test data
+	user := createTestUser(t, db)
+	order := &models.Order{
+		UserID:   user.ID,
+		Status:   "pending",
+		Subtotal: 100.0,
+		Total:    100.0,
+	}
+	require.NoError(t, db.Create(order).Error)
+
+	tests := []struct {
+		name           string
+		orderID        string
+		newStatus      string
+		mockSetup      func()
+		expectedError  bool
+		expectedStatus string
+	}{
+		{
+			name:      "successful status update with email notification",
+			orderID:   order.ID,
+			newStatus: "processing",
+			mockSetup: func() {
+				mockEmailService.On("SendOrderStatusUpdate", mock.AnythingOfType("*models.Order"), "pending", "processing").Return(nil)
+			},
+			expectedError:  false,
+			expectedStatus: "processing",
+		},
+		{
+			name:      "status update with email failure (should not fail)",
+			orderID:   order.ID,
+			newStatus: "shipped",
+			mockSetup: func() {
+				mockEmailService.On("SendOrderStatusUpdate", mock.AnythingOfType("*models.Order"), "processing", "shipped").Return(assert.AnError)
+			},
+			expectedError:  false,
+			expectedStatus: "shipped",
+		},
+		{
+			name:          "invalid status",
+			orderID:       order.ID,
+			newStatus:     "invalid_status",
+			mockSetup:     func() {},
+			expectedError: true,
+		},
+		{
+			name:          "non-existent order",
+			orderID:       "non-existent-id",
+			newStatus:     "processing",
+			mockSetup:     func() {},
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset mock
+			mockEmailService.ExpectedCalls = nil
+			tt.mockSetup()
+
+			updatedOrder, err := service.UpdateOrderStatus(tt.orderID, tt.newStatus)
+
+			if tt.expectedError {
+				assert.Error(t, err)
+				assert.Nil(t, updatedOrder)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, updatedOrder)
+				assert.Equal(t, tt.expectedStatus, updatedOrder.Status)
+			}
+
+			// Verify mock expectations
+			mockEmailService.AssertExpectations(t)
+		})
+	}
+}
+
+// Mock email service for testing
+type MockEmailService struct {
+	mock.Mock
+}
+
+func (m *MockEmailService) SendOrderStatusUpdate(order *models.Order, oldStatus, newStatus string) error {
+	args := m.Called(order, oldStatus, newStatus)
+	return args.Error(0)
 }

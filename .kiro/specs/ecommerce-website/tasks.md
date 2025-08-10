@@ -61,7 +61,7 @@
   - Write tests for payment flows including failure scenarios
   - _Requirements: 4.2, 4.3, 4.4_
 
-- [ ] 9. Build admin product management system
+- [x] 9. Build admin product management system
   - Create POST /api/admin/products for adding new products with image upload
   - Implement PUT /api/admin/products/:id for product updates
   - Build DELETE /api/admin/products/:id with soft delete functionality
@@ -69,7 +69,7 @@
   - Write tests for admin product operations
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
 
-- [ ] 10. Develop admin order management
+- [x] 10. Develop admin order management
   - Create GET /api/admin/orders endpoint with filtering and pagination
   - Implement PUT /api/admin/orders/:id/status for order status updates
   - Build email notification system for order status changes

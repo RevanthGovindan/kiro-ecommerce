@@ -140,7 +140,7 @@ func (suite *ProductServiceTestSuite) TestGetProducts_WithSearch() {
 	laptop := suite.createTestProduct(category.ID, "Gaming Laptop", 999.99)
 	laptop.Description = "High performance gaming laptop"
 	suite.db.Save(laptop)
-	
+
 	suite.createTestProduct(category.ID, "Phone", 599.99)
 
 	// Test search functionality
@@ -255,7 +255,7 @@ func (suite *ProductServiceTestSuite) TestSearchProducts() {
 	laptop := suite.createTestProduct(category.ID, "Gaming Laptop", 999.99)
 	laptop.Description = "High performance gaming laptop"
 	suite.db.Save(laptop)
-	
+
 	suite.createTestProduct(category.ID, "Phone", 599.99)
 
 	// Test search
@@ -309,6 +309,244 @@ func (suite *ProductServiceTestSuite) TestGetCategoryByID_NotFound() {
 	assert.Error(suite.T(), err)
 	assert.Nil(suite.T(), result)
 	assert.Contains(suite.T(), err.Error(), "category not found")
+}
+
+// Admin Product Management Service Tests
+
+func (suite *ProductServiceTestSuite) TestCreateProduct_Success() {
+	// Setup test data
+	category := suite.createTestCategory()
+
+	req := CreateProductRequest{
+		Name:        "Test Product",
+		Description: "Test Description",
+		Price:       99.99,
+		SKU:         "TEST-SKU-001",
+		Inventory:   50,
+		CategoryID:  category.ID,
+		Images:      []string{"image1.jpg", "image2.jpg"},
+		Specifications: map[string]interface{}{
+			"color": "red",
+			"size":  "large",
+		},
+	}
+
+	// Test creating product
+	result, err := suite.service.CreateProduct(req)
+
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), result)
+	assert.Equal(suite.T(), "Test Product", result.Name)
+	assert.Equal(suite.T(), "TEST-SKU-001", result.SKU)
+	assert.Equal(suite.T(), 99.99, result.Price)
+	assert.Equal(suite.T(), 50, result.Inventory)
+	assert.Equal(suite.T(), category.ID, result.CategoryID)
+	assert.Equal(suite.T(), category.Name, result.Category.Name)
+	assert.True(suite.T(), result.IsActive)
+}
+
+func (suite *ProductServiceTestSuite) TestCreateProduct_CategoryNotFound() {
+	req := CreateProductRequest{
+		Name:       "Test Product",
+		Price:      99.99,
+		SKU:        "TEST-SKU-001",
+		CategoryID: "non-existent",
+	}
+
+	result, err := suite.service.CreateProduct(req)
+
+	assert.Error(suite.T(), err)
+	assert.Nil(suite.T(), result)
+	assert.Contains(suite.T(), err.Error(), "category not found")
+}
+
+func (suite *ProductServiceTestSuite) TestCreateProduct_DuplicateSKU() {
+	category := suite.createTestCategory()
+	suite.createTestProduct(category.ID, "Existing Product", 99.99)
+
+	req := CreateProductRequest{
+		Name:       "New Product",
+		Price:      199.99,
+		SKU:        "SKU-Existing Product", // Same SKU as existing product
+		CategoryID: category.ID,
+	}
+
+	result, err := suite.service.CreateProduct(req)
+
+	assert.Error(suite.T(), err)
+	assert.Nil(suite.T(), result)
+	assert.Contains(suite.T(), err.Error(), "sku already exists")
+}
+
+func (suite *ProductServiceTestSuite) TestUpdateProduct_Success() {
+	category := suite.createTestCategory()
+	product := suite.createTestProduct(category.ID, "Original Product", 99.99)
+
+	updatePrice := 149.99
+	updateName := "Updated Product"
+	req := UpdateProductRequest{
+		Name:  &updateName,
+		Price: &updatePrice,
+	}
+
+	result, err := suite.service.UpdateProduct(product.ID, req)
+
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), result)
+	assert.Equal(suite.T(), "Updated Product", result.Name)
+	assert.Equal(suite.T(), 149.99, result.Price)
+	assert.Equal(suite.T(), product.SKU, result.SKU) // SKU unchanged
+}
+
+func (suite *ProductServiceTestSuite) TestUpdateProduct_NotFound() {
+	updateName := "Updated Product"
+	req := UpdateProductRequest{
+		Name: &updateName,
+	}
+
+	result, err := suite.service.UpdateProduct("non-existent", req)
+
+	assert.Error(suite.T(), err)
+	assert.Nil(suite.T(), result)
+	assert.Contains(suite.T(), err.Error(), "product not found")
+}
+
+func (suite *ProductServiceTestSuite) TestUpdateProduct_DuplicateSKU() {
+	category := suite.createTestCategory()
+	product1 := suite.createTestProduct(category.ID, "Product1", 99.99)
+	product2 := suite.createTestProduct(category.ID, "Product2", 199.99)
+
+	// Try to update product2 with product1's SKU
+	newSKU := product1.SKU
+	req := UpdateProductRequest{
+		SKU: &newSKU,
+	}
+
+	result, err := suite.service.UpdateProduct(product2.ID, req)
+
+	assert.Error(suite.T(), err)
+	assert.Nil(suite.T(), result)
+	assert.Contains(suite.T(), err.Error(), "sku already exists")
+}
+
+func (suite *ProductServiceTestSuite) TestDeleteProduct_Success() {
+	category := suite.createTestCategory()
+	product := suite.createTestProduct(category.ID, "Product to Delete", 99.99)
+
+	err := suite.service.DeleteProduct(product.ID)
+
+	assert.NoError(suite.T(), err)
+
+	// Verify product is soft deleted
+	var deletedProduct models.Product
+	err = suite.db.Unscoped().Where("id = ?", product.ID).First(&deletedProduct).Error
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), deletedProduct.DeletedAt)
+
+	// Verify product is not found in regular queries
+	_, err = suite.service.GetProductByID(product.ID)
+	assert.Error(suite.T(), err)
+	assert.Contains(suite.T(), err.Error(), "product not found")
+}
+
+func (suite *ProductServiceTestSuite) TestDeleteProduct_NotFound() {
+	err := suite.service.DeleteProduct("non-existent")
+
+	assert.Error(suite.T(), err)
+	assert.Contains(suite.T(), err.Error(), "product not found")
+}
+
+func (suite *ProductServiceTestSuite) TestUpdateInventory_Success() {
+	category := suite.createTestCategory()
+	product := suite.createTestProduct(category.ID, "Product", 99.99)
+
+	result, err := suite.service.UpdateInventory(product.ID, 100)
+
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), result)
+	assert.Equal(suite.T(), 100, result.Inventory)
+}
+
+func (suite *ProductServiceTestSuite) TestUpdateInventory_NotFound() {
+	result, err := suite.service.UpdateInventory("non-existent", 100)
+
+	assert.Error(suite.T(), err)
+	assert.Nil(suite.T(), result)
+	assert.Contains(suite.T(), err.Error(), "product not found")
+}
+
+func (suite *ProductServiceTestSuite) TestGetAllProductsAdmin_Success() {
+	category := suite.createTestCategory()
+
+	// Create active product
+	suite.createTestProduct(category.ID, "Active Product", 99.99)
+
+	// Create inactive product
+	inactiveProduct := suite.createTestProduct(category.ID, "Inactive Product", 199.99)
+	inactiveProduct.IsActive = false
+	suite.db.Save(inactiveProduct)
+
+	// Create soft deleted product
+	deletedProduct := suite.createTestProduct(category.ID, "Deleted Product", 299.99)
+	suite.db.Delete(deletedProduct)
+
+	filters := AdminProductFilters{}
+	sort := ProductSort{}
+	pagination := PaginationParams{Page: 1, PageSize: 10}
+
+	result, err := suite.service.GetAllProductsAdmin(filters, sort, pagination)
+
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), result)
+	assert.Equal(suite.T(), int64(3), result.Total) // Includes inactive and deleted
+	assert.Len(suite.T(), result.Products, 3)
+}
+
+func (suite *ProductServiceTestSuite) TestGetAllProductsAdmin_WithActiveFilter() {
+	category := suite.createTestCategory()
+
+	// Create active product
+	suite.createTestProduct(category.ID, "Active Product", 99.99)
+
+	// Create inactive product
+	inactiveProduct := suite.createTestProduct(category.ID, "Inactive Product", 199.99)
+	inactiveProduct.IsActive = false
+	suite.db.Save(inactiveProduct)
+
+	isActive := true
+	filters := AdminProductFilters{IsActive: &isActive}
+	sort := ProductSort{}
+	pagination := PaginationParams{Page: 1, PageSize: 10}
+
+	result, err := suite.service.GetAllProductsAdmin(filters, sort, pagination)
+
+	assert.NoError(suite.T(), err)
+	assert.Equal(suite.T(), int64(1), result.Total)
+	assert.Len(suite.T(), result.Products, 1)
+	assert.Equal(suite.T(), "Active Product", result.Products[0].Name)
+}
+
+func (suite *ProductServiceTestSuite) TestGetAllProductsAdmin_WithSearch() {
+	category := suite.createTestCategory()
+
+	// Create products with different names and SKUs
+	product1 := suite.createTestProduct(category.ID, "Gaming Laptop", 999.99)
+	product1.SKU = "GAMING-001"
+	suite.db.Save(product1)
+
+	suite.createTestProduct(category.ID, "Phone", 599.99)
+
+	search := "gaming"
+	filters := AdminProductFilters{Search: &search}
+	sort := ProductSort{}
+	pagination := PaginationParams{Page: 1, PageSize: 10}
+
+	result, err := suite.service.GetAllProductsAdmin(filters, sort, pagination)
+
+	assert.NoError(suite.T(), err)
+	assert.Equal(suite.T(), int64(1), result.Total)
+	assert.Len(suite.T(), result.Products, 1)
+	assert.Equal(suite.T(), "Gaming Laptop", result.Products[0].Name)
 }
 
 func TestProductServiceTestSuite(t *testing.T) {

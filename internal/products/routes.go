@@ -1,11 +1,13 @@
 package products
 
 import (
+	"ecommerce-website/internal/auth"
+
 	"github.com/gin-gonic/gin"
 )
 
 // SetupRoutes configures product and category routes
-func SetupRoutes(router *gin.Engine, handler *Handler) {
+func SetupRoutes(router *gin.Engine, handler *Handler, authService *auth.Service) {
 	// Product routes
 	products := router.Group("/api/products")
 	{
@@ -19,5 +21,17 @@ func SetupRoutes(router *gin.Engine, handler *Handler) {
 	{
 		categories.GET("", handler.GetCategories)
 		categories.GET("/:id", handler.GetCategoryByID)
+	}
+
+	// Admin product routes
+	adminProducts := router.Group("/api/admin/products")
+	adminProducts.Use(authService.AuthMiddleware())
+	adminProducts.Use(authService.AdminMiddleware())
+	{
+		adminProducts.GET("", handler.GetAllProductsAdmin)
+		adminProducts.POST("", handler.CreateProduct)
+		adminProducts.PUT("/:id", handler.UpdateProduct)
+		adminProducts.DELETE("/:id", handler.DeleteProduct)
+		adminProducts.PUT("/:id/inventory", handler.UpdateInventory)
 	}
 }

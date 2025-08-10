@@ -3,8 +3,10 @@ package orders
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"ecommerce-website/internal/cart"
+	"ecommerce-website/internal/email"
 	"ecommerce-website/internal/models"
 
 	"gorm.io/gorm"
@@ -15,28 +17,41 @@ type ServiceInterface interface {
 	CreateOrder(ctx context.Context, userID string, req *CreateOrderRequest) (*models.Order, error)
 	GetOrder(orderID string, userID string) (*models.Order, error)
 	GetUserOrders(userID string, page, limit int) ([]models.Order, int64, error)
-	GetAllOrders(page, limit int, status string) ([]models.Order, int64, error)
+	GetAllOrders(page, limit int, status, userID string) ([]models.Order, int64, error)
 	UpdateOrderStatus(orderID string, status string) (*models.Order, error)
+	GetAllCustomers(page, limit int, search string) ([]models.User, int64, error)
 }
 
 type Service struct {
-	db          *gorm.DB
-	cartService cart.ServiceInterface
+	db           *gorm.DB
+	cartService  cart.ServiceInterface
+	emailService email.ServiceInterface
 }
 
 // NewService creates a new orders service
 func NewService(db *gorm.DB) *Service {
 	return &Service{
-		db:          db,
-		cartService: cart.NewService(),
+		db:           db,
+		cartService:  cart.NewService(),
+		emailService: email.NewService(),
 	}
 }
 
 // NewServiceWithCartService creates a new orders service with a provided cart service
 func NewServiceWithCartService(db *gorm.DB, cartService cart.ServiceInterface) *Service {
 	return &Service{
-		db:          db,
-		cartService: cartService,
+		db:           db,
+		cartService:  cartService,
+		emailService: email.NewService(),
+	}
+}
+
+// NewServiceWithDependencies creates a new orders service with all dependencies
+func NewServiceWithDependencies(db *gorm.DB, cartService cart.ServiceInterface, emailService email.ServiceInterface) *Service {
+	return &Service{
+		db:           db,
+		cartService:  cartService,
+		emailService: emailService,
 	}
 }
 
@@ -227,15 +242,21 @@ func (s *Service) UpdateOrderStatus(orderID string, status string) (*models.Orde
 		return nil, fmt.Errorf("invalid order status: %s", status)
 	}
 
+	// Get current order to check existing status
+	var currentOrder models.Order
+	if err := s.db.Preload("Items.Product").Preload("User").Where("id = ?", orderID).First(&currentOrder).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("order not found")
+		}
+		return nil, fmt.Errorf("failed to get current order: %w", err)
+	}
+
+	oldStatus := currentOrder.Status
+
 	// Update order status
 	result := s.db.Model(&models.Order{}).Where("id = ?", orderID).Update("status", status)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to update order status: %w", result.Error)
-	}
-
-	// Check if any rows were affected
-	if result.RowsAffected == 0 {
-		return nil, fmt.Errorf("order not found")
 	}
 
 	// Get updated order
@@ -244,11 +265,19 @@ func (s *Service) UpdateOrderStatus(orderID string, status string) (*models.Orde
 		return nil, fmt.Errorf("failed to get updated order: %w", err)
 	}
 
+	// Send email notification if status changed
+	if oldStatus != status {
+		if err := s.emailService.SendOrderStatusUpdate(&order, oldStatus, status); err != nil {
+			// Log error but don't fail the status update
+			fmt.Printf("Warning: failed to send order status update email: %v\n", err)
+		}
+	}
+
 	return &order, nil
 }
 
 // GetAllOrders retrieves all orders with pagination (admin only)
-func (s *Service) GetAllOrders(page, limit int, status string) ([]models.Order, int64, error) {
+func (s *Service) GetAllOrders(page, limit int, status, userID string) ([]models.Order, int64, error) {
 	var orders []models.Order
 	var total int64
 
@@ -257,6 +286,11 @@ func (s *Service) GetAllOrders(page, limit int, status string) ([]models.Order, 
 	// Filter by status if provided
 	if status != "" {
 		query = query.Where("status = ?", status)
+	}
+
+	// Filter by user ID if provided
+	if userID != "" {
+		query = query.Where("user_id = ?", userID)
 	}
 
 	// Count total orders
@@ -272,6 +306,9 @@ func (s *Service) GetAllOrders(page, limit int, status string) ([]models.Order, 
 	if status != "" {
 		query = query.Where("status = ?", status)
 	}
+	if userID != "" {
+		query = query.Where("user_id = ?", userID)
+	}
 
 	if err := query.Order("created_at DESC").
 		Limit(limit).
@@ -281,4 +318,47 @@ func (s *Service) GetAllOrders(page, limit int, status string) ([]models.Order, 
 	}
 
 	return orders, total, nil
+}
+
+// GetAllCustomers retrieves all customers with pagination and search (admin only)
+func (s *Service) GetAllCustomers(page, limit int, search string) ([]models.User, int64, error) {
+	var customers []models.User
+	var total int64
+
+	query := s.db.Model(&models.User{}).Where("role = ? AND is_active = ?", "customer", true)
+
+	// Add search functionality
+	if search != "" {
+		searchTerm := "%" + strings.ToLower(search) + "%"
+		query = query.Where(
+			"LOWER(first_name) LIKE ? OR LOWER(last_name) LIKE ? OR LOWER(email) LIKE ?",
+			searchTerm, searchTerm, searchTerm,
+		)
+	}
+
+	// Count total customers
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to count customers: %w", err)
+	}
+
+	// Calculate offset
+	offset := (page - 1) * limit
+
+	// Get customers with pagination, including order count
+	if err := query.Select("users.*, COUNT(orders.id) as order_count").
+		Joins("LEFT JOIN orders ON users.id = orders.user_id").
+		Group("users.id").
+		Order("users.created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&customers).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to get customers: %w", err)
+	}
+
+	// Remove password from response
+	for i := range customers {
+		customers[i].Password = ""
+	}
+
+	return customers, total, nil
 }

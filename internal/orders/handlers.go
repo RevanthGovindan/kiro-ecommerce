@@ -163,6 +163,7 @@ func (h *Handler) GetAllOrders(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	status := c.Query("status")
+	userID := c.Query("userId")
 
 	// Validate pagination parameters
 	if page < 1 {
@@ -172,7 +173,7 @@ func (h *Handler) GetAllOrders(c *gin.Context) {
 		limit = 10
 	}
 
-	orders, total, err := h.service.GetAllOrders(page, limit, status)
+	orders, total, err := h.service.GetAllOrders(page, limit, status, userID)
 	if err != nil {
 		utils.ErrorResponse(c, http.StatusInternalServerError, "GET_ORDERS_FAILED", "Failed to get orders", err.Error())
 		return
@@ -192,6 +193,43 @@ func (h *Handler) GetAllOrders(c *gin.Context) {
 	}
 
 	utils.SuccessResponse(c, http.StatusOK, "Orders retrieved successfully", response)
+}
+
+// GetAllCustomers handles GET /api/admin/customers (admin only)
+func (h *Handler) GetAllCustomers(c *gin.Context) {
+	// Parse pagination parameters
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	search := c.Query("search")
+
+	// Validate pagination parameters
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 10
+	}
+
+	customers, total, err := h.service.GetAllCustomers(page, limit, search)
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, "GET_CUSTOMERS_FAILED", "Failed to get customers", err.Error())
+		return
+	}
+
+	// Calculate pagination info
+	totalPages := (int(total) + limit - 1) / limit
+
+	response := gin.H{
+		"customers": customers,
+		"pagination": gin.H{
+			"page":       page,
+			"limit":      limit,
+			"total":      total,
+			"totalPages": totalPages,
+		},
+	}
+
+	utils.SuccessResponse(c, http.StatusOK, "Customers retrieved successfully", response)
 }
 
 // UpdateOrderStatus handles PUT /api/admin/orders/:id/status (admin only)

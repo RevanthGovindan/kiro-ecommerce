@@ -44,8 +44,8 @@ func (m *MockService) GetUserOrders(userID string, page, limit int) ([]models.Or
 	return args.Get(0).([]models.Order), args.Get(1).(int64), args.Error(2)
 }
 
-func (m *MockService) GetAllOrders(page, limit int, status string) ([]models.Order, int64, error) {
-	args := m.Called(page, limit, status)
+func (m *MockService) GetAllOrders(page, limit int, status, userID string) ([]models.Order, int64, error) {
+	args := m.Called(page, limit, status, userID)
 	return args.Get(0).([]models.Order), args.Get(1).(int64), args.Error(2)
 }
 
@@ -55,6 +55,11 @@ func (m *MockService) UpdateOrderStatus(orderID string, status string) (*models.
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*models.Order), args.Error(1)
+}
+
+func (m *MockService) GetAllCustomers(page, limit int, search string) ([]models.User, int64, error) {
+	args := m.Called(page, limit, search)
+	return args.Get(0).([]models.User), args.Get(1).(int64), args.Error(2)
 }
 
 func setupTestRouter() *gin.Engine {
@@ -451,6 +456,172 @@ func TestValidateOrderAddress(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
+		})
+	}
+}
+func TestHandler_GetAllOrders(t *testing.T) {
+	mockService := new(MockService)
+	handler := NewHandler(mockService)
+	router := setupTestRouter()
+
+	// Setup route with middleware simulation (admin)
+	router.GET("/api/admin/orders", func(c *gin.Context) {
+		c.Set("userID", "admin-user-id")
+		c.Set("userRole", "admin")
+		handler.GetAllOrders(c)
+	})
+
+	tests := []struct {
+		name           string
+		queryParams    string
+		mockSetup      func()
+		expectedStatus int
+	}{
+		{
+			name:        "successful orders retrieval with filters",
+			queryParams: "?page=1&limit=10&status=pending&userId=test-user-id",
+			mockSetup: func() {
+				orders := []models.Order{
+					{
+						ID:       "order1",
+						UserID:   "test-user-id",
+						Status:   "pending",
+						Subtotal: 99.99,
+						Total:    99.99,
+					},
+				}
+				mockService.On("GetAllOrders", 1, 10, "pending", "test-user-id").Return(orders, int64(1), nil)
+			},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:        "default pagination without filters",
+			queryParams: "",
+			mockSetup: func() {
+				orders := []models.Order{}
+				mockService.On("GetAllOrders", 1, 10, "", "").Return(orders, int64(0), nil)
+			},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:        "service error",
+			queryParams: "?page=1&limit=10",
+			mockSetup: func() {
+				mockService.On("GetAllOrders", 1, 10, "", "").Return([]models.Order{}, int64(0), assert.AnError)
+			},
+			expectedStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset mock
+			mockService.ExpectedCalls = nil
+			tt.mockSetup()
+
+			// Create request
+			req, _ := http.NewRequest("GET", "/api/admin/orders"+tt.queryParams, nil)
+
+			// Create response recorder
+			w := httptest.NewRecorder()
+
+			// Perform request
+			router.ServeHTTP(w, req)
+
+			// Assert status code
+			assert.Equal(t, tt.expectedStatus, w.Code)
+
+			// Verify mock expectations
+			mockService.AssertExpectations(t)
+		})
+	}
+}
+
+func TestHandler_GetAllCustomers(t *testing.T) {
+	mockService := new(MockService)
+	handler := NewHandler(mockService)
+	router := setupTestRouter()
+
+	// Setup route with middleware simulation (admin)
+	router.GET("/api/admin/customers", func(c *gin.Context) {
+		c.Set("userID", "admin-user-id")
+		c.Set("userRole", "admin")
+		handler.GetAllCustomers(c)
+	})
+
+	tests := []struct {
+		name           string
+		queryParams    string
+		mockSetup      func()
+		expectedStatus int
+	}{
+		{
+			name:        "successful customers retrieval with search",
+			queryParams: "?page=1&limit=10&search=john",
+			mockSetup: func() {
+				customers := []models.User{
+					{
+						ID:        "user1",
+						Email:     "john@example.com",
+						FirstName: "John",
+						LastName:  "Doe",
+						Role:      "customer",
+						IsActive:  true,
+					},
+				}
+				mockService.On("GetAllCustomers", 1, 10, "john").Return(customers, int64(1), nil)
+			},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:        "default pagination without search",
+			queryParams: "",
+			mockSetup: func() {
+				customers := []models.User{}
+				mockService.On("GetAllCustomers", 1, 10, "").Return(customers, int64(0), nil)
+			},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:        "service error",
+			queryParams: "?page=1&limit=10",
+			mockSetup: func() {
+				mockService.On("GetAllCustomers", 1, 10, "").Return([]models.User{}, int64(0), assert.AnError)
+			},
+			expectedStatus: http.StatusInternalServerError,
+		},
+		{
+			name:        "invalid pagination parameters",
+			queryParams: "?page=0&limit=200",
+			mockSetup: func() {
+				customers := []models.User{}
+				// Should use corrected values: page=1, limit=10
+				mockService.On("GetAllCustomers", 1, 10, "").Return(customers, int64(0), nil)
+			},
+			expectedStatus: http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset mock
+			mockService.ExpectedCalls = nil
+			tt.mockSetup()
+
+			// Create request
+			req, _ := http.NewRequest("GET", "/api/admin/customers"+tt.queryParams, nil)
+
+			// Create response recorder
+			w := httptest.NewRecorder()
+
+			// Perform request
+			router.ServeHTTP(w, req)
+
+			// Assert status code
+			assert.Equal(t, tt.expectedStatus, w.Code)
+
+			// Verify mock expectations
+			mockService.AssertExpectations(t)
 		})
 	}
 }

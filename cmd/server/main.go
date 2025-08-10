@@ -91,7 +91,7 @@ func main() {
 	auth.SetupRoutes(r, authHandler, authService)
 
 	// Setup product routes
-	products.SetupRoutes(r, productHandler)
+	products.SetupRoutes(r, productHandler, authService)
 
 	// Setup user routes
 	users.SetupRoutes(r, userHandler, authService)

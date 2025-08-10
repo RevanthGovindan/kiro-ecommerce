@@ -11,6 +11,11 @@ type Config struct {
 	JWTSecret      string
 	RazorpayKeyID  string
 	RazorpaySecret string
+	SMTPHost       string
+	SMTPPort       string
+	SMTPUsername   string
+	SMTPPassword   string
+	FromEmail      string
 }
 
 func Load() *Config {
@@ -21,6 +26,11 @@ func Load() *Config {
 		JWTSecret:      getEnv("JWT_SECRET", "your-secret-key"),
 		RazorpayKeyID:  getEnv("RAZORPAY_KEY_ID", ""),
 		RazorpaySecret: getEnv("RAZORPAY_SECRET", ""),
+		SMTPHost:       getEnv("SMTP_HOST", ""),
+		SMTPPort:       getEnv("SMTP_PORT", "587"),
+		SMTPUsername:   getEnv("SMTP_USERNAME", ""),
+		SMTPPassword:   getEnv("SMTP_PASSWORD", ""),
+		FromEmail:      getEnv("FROM_EMAIL", ""),
 	}
 }
 

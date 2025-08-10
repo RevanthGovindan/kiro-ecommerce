@@ -29,5 +29,6 @@ func SetupRoutes(r *gin.Engine, handler *Handler, authService *auth.Service) {
 	{
 		admin.GET("/orders", handler.GetAllOrders)
 		admin.PUT("/orders/:id/status", handler.UpdateOrderStatus)
+		admin.GET("/customers", handler.GetAllCustomers)
 	}
 }
