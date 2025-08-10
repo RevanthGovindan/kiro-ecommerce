@@ -53,10 +53,10 @@
   - Write comprehensive tests for order creation flow
   - _Requirements: 4.3, 4.5, 6.1_
 
-- [ ] 8. Integrate Stripe payment processing
-  - Set up Stripe SDK and webhook endpoint configuration
-  - Implement POST /api/payments/create-intent for payment initialization
-  - Build POST /api/payments/confirm for payment completion
+- [x] 8. Integrate Razorpay payment processing
+  - Set up Razorpay SDK and webhook endpoint configuration
+  - Implement POST /api/payments/create-order for payment initialization
+  - Build POST /api/payments/verify for payment verification
   - Create webhook handler for payment status updates
   - Write tests for payment flows including failure scenarios
   - _Requirements: 4.2, 4.3, 4.4_
@@ -88,7 +88,7 @@
 - [ ] 12. Implement frontend shopping cart and checkout
   - Create shopping cart page with item management functionality
   - Build multi-step checkout process (shipping, payment, confirmation)
-  - Integrate Stripe Elements for secure payment form
+  - Integrate Razorpay Checkout for secure payment form
   - Add order confirmation page with email notification
   - Write E2E tests for complete purchase flow
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 4.1, 4.2, 4.3_

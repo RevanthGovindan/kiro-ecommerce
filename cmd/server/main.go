@@ -11,6 +11,7 @@ import (
 	"ecommerce-website/internal/config"
 	"ecommerce-website/internal/database"
 	"ecommerce-website/internal/orders"
+	"ecommerce-website/internal/payments"
 	"ecommerce-website/internal/products"
 	"ecommerce-website/internal/users"
 	"ecommerce-website/pkg/utils"
@@ -70,6 +71,10 @@ func main() {
 	ordersService := orders.NewService(database.GetDB())
 	ordersHandler := orders.NewHandler(ordersService)
 
+	// Initialize payments service
+	paymentsService := payments.NewService(database.GetDB(), cfg.RazorpayKeyID, cfg.RazorpaySecret)
+	paymentsHandler := payments.NewHandler(paymentsService)
+
 	// Setup routes
 	r.GET("/health", func(c *gin.Context) {
 		utils.SuccessResponse(c, http.StatusOK, "Ecommerce API is running", gin.H{
@@ -96,6 +101,9 @@ func main() {
 
 	// Setup orders routes
 	orders.SetupRoutes(r, ordersHandler, authService)
+
+	// Setup payments routes
+	payments.SetupRoutes(r, paymentsHandler, authService)
 
 	log.Printf("Starting server on port %s", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {
