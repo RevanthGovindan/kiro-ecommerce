@@ -77,7 +77,7 @@
   - Write tests for admin order management functionality
   - _Requirements: 6.1, 6.2, 6.3, 6.5_
 
-- [ ] 11. Build frontend homepage and product catalog
+- [x] 11. Build frontend homepage and product catalog
   - Create responsive homepage with featured products and categories
   - Implement product catalog page with grid/list view toggle
   - Build product detail page with image gallery and add to cart
@@ -85,7 +85,7 @@
   - Write component tests for product display functionality
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
 
-- [ ] 12. Implement frontend shopping cart and checkout
+- [x] 12. Implement frontend shopping cart and checkout
   - Create shopping cart page with item management functionality
   - Build multi-step checkout process (shipping, payment, confirmation)
   - Integrate Razorpay Checkout for secure payment form
@@ -93,7 +93,7 @@
   - Write E2E tests for complete purchase flow
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 4.1, 4.2, 4.3_
 
-- [ ] 13. Build user authentication and profile frontend
+- [x] 13. Build user authentication and profile frontend
   - Create login and registration forms with validation
   - Implement user profile page with editable information
   - Build order history page with order details
@@ -101,7 +101,7 @@
   - Write tests for authentication user flows
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
 
-- [ ] 14. Develop admin dashboard frontend
+- [x] 14. Develop admin dashboard frontend
   - Create admin login and dashboard layout
   - Build product management interface with CRUD operations
   - Implement order management dashboard with status updates

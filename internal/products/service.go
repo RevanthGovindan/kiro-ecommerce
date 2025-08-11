@@ -160,6 +160,217 @@ func (s *Service) SearchProducts(query string, pagination PaginationParams) (*Pr
 	return s.GetProducts(filters, ProductSort{}, pagination)
 }
 
+// AdvancedSearchProducts performs advanced search with Elasticsearch integration
+func (s *Service) AdvancedSearchProducts(filters AdvancedSearchFilters, sort AdvancedSearchSort, page, pageSize int, includeFacets bool) (*AdvancedSearchResponse, error) {
+	// This would integrate with the search service
+	// For now, we'll implement a fallback using the existing database search
+
+	// Convert filters to ProductFilters
+	productFilters := ProductFilters{
+		CategoryID: filters.CategoryID,
+		MinPrice:   filters.MinPrice,
+		MaxPrice:   filters.MaxPrice,
+		InStock:    filters.InStock,
+		Search:     filters.Search,
+	}
+
+	// Convert sort to ProductSort
+	productSort := ProductSort{
+		Field: sort.Field,
+		Order: sort.Order,
+	}
+
+	// Convert pagination
+	pagination := PaginationParams{
+		Page:     page,
+		PageSize: pageSize,
+	}
+
+	// Get products using existing method
+	response, err := s.GetProducts(productFilters, productSort, pagination)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to AdvancedSearchResponse
+	advancedResponse := &AdvancedSearchResponse{
+		Products:   response.Products,
+		Total:      response.Total,
+		Page:       response.Page,
+		PageSize:   response.PageSize,
+		TotalPages: response.TotalPages,
+	}
+
+	// Add facets if requested
+	if includeFacets {
+		facets, err := s.buildFacets(productFilters)
+		if err != nil {
+			// Log error but don't fail the request
+			fmt.Printf("Warning: Failed to build facets: %v\n", err)
+		} else {
+			advancedResponse.Facets = facets
+		}
+	}
+
+	return advancedResponse, nil
+}
+
+// GetSearchSuggestions returns search suggestions
+func (s *Service) GetSearchSuggestions(query string, size int) ([]string, error) {
+	if size <= 0 {
+		size = 5
+	}
+
+	var products []models.Product
+	searchTerm := query + "%"
+
+	if err := s.db.Select("name").
+		Where("is_active = ? AND LOWER(name) LIKE LOWER(?)", true, searchTerm).
+		Limit(size).
+		Find(&products).Error; err != nil {
+		return nil, fmt.Errorf("failed to fetch suggestions: %w", err)
+	}
+
+	var suggestions []string
+	for _, product := range products {
+		suggestions = append(suggestions, product.Name)
+	}
+
+	return suggestions, nil
+}
+
+// buildFacets builds facets for advanced search
+func (s *Service) buildFacets(filters ProductFilters) (*SearchFacets, error) {
+	facets := &SearchFacets{}
+
+	// Build category facets
+	categoryFacets, err := s.buildCategoryFacets(filters)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build category facets: %w", err)
+	}
+	facets.Categories = categoryFacets
+
+	// Build price range facets
+	priceRangeFacets, err := s.buildPriceRangeFacets(filters)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build price range facets: %w", err)
+	}
+	facets.PriceRanges = priceRangeFacets
+
+	return facets, nil
+}
+
+// buildCategoryFacets builds category facets
+func (s *Service) buildCategoryFacets(filters ProductFilters) ([]CategoryFacet, error) {
+	type CategoryCount struct {
+		CategoryID   string `json:"category_id"`
+		CategoryName string `json:"category_name"`
+		Count        int64  `json:"count"`
+	}
+
+	var categoryCounts []CategoryCount
+
+	query := s.db.Table("products").
+		Select("products.category_id, categories.name as category_name, COUNT(*) as count").
+		Joins("LEFT JOIN categories ON products.category_id = categories.id").
+		Where("products.is_active = ? AND categories.is_active = ?", true, true).
+		Group("products.category_id, categories.name")
+
+	// Apply filters (excluding category filter for facets)
+	if filters.MinPrice != nil {
+		query = query.Where("products.price >= ?", *filters.MinPrice)
+	}
+
+	if filters.MaxPrice != nil {
+		query = query.Where("products.price <= ?", *filters.MaxPrice)
+	}
+
+	if filters.InStock != nil && *filters.InStock {
+		query = query.Where("products.inventory > 0")
+	}
+
+	if filters.Search != nil && *filters.Search != "" {
+		searchTerm := "%" + *filters.Search + "%"
+		query = query.Where("LOWER(products.name) LIKE LOWER(?) OR LOWER(products.description) LIKE LOWER(?)", searchTerm, searchTerm)
+	}
+
+	if err := query.Find(&categoryCounts).Error; err != nil {
+		return nil, err
+	}
+
+	var facets []CategoryFacet
+	for _, cc := range categoryCounts {
+		facets = append(facets, CategoryFacet{
+			ID:    cc.CategoryID,
+			Name:  cc.CategoryName,
+			Count: cc.Count,
+		})
+	}
+
+	return facets, nil
+}
+
+// buildPriceRangeFacets builds price range facets
+func (s *Service) buildPriceRangeFacets(filters ProductFilters) ([]PriceRangeFacet, error) {
+	priceRanges := []struct {
+		Range string
+		Min   float64
+		Max   *float64
+	}{
+		{"0-25", 0, &[]float64{25}[0]},
+		{"25-50", 25, &[]float64{50}[0]},
+		{"50-100", 50, &[]float64{100}[0]},
+		{"100-250", 100, &[]float64{250}[0]},
+		{"250+", 250, nil},
+	}
+
+	var facets []PriceRangeFacet
+
+	for _, pr := range priceRanges {
+		query := s.db.Model(&models.Product{}).
+			Where("is_active = ?", true)
+
+		// Apply filters (excluding price filter for facets)
+		if filters.CategoryID != nil {
+			query = query.Where("category_id = ?", *filters.CategoryID)
+		}
+
+		if filters.InStock != nil && *filters.InStock {
+			query = query.Where("inventory > 0")
+		}
+
+		if filters.Search != nil && *filters.Search != "" {
+			searchTerm := "%" + *filters.Search + "%"
+			query = query.Where("LOWER(name) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?)", searchTerm, searchTerm)
+		}
+
+		// Apply price range
+		query = query.Where("price >= ?", pr.Min)
+		if pr.Max != nil {
+			query = query.Where("price <= ?", *pr.Max)
+		}
+
+		var count int64
+		if err := query.Count(&count).Error; err != nil {
+			return nil, err
+		}
+
+		maxValue := float64(999999)
+		if pr.Max != nil {
+			maxValue = *pr.Max
+		}
+
+		facets = append(facets, PriceRangeFacet{
+			Range: pr.Range,
+			Min:   pr.Min,
+			Max:   maxValue,
+			Count: count,
+		})
+	}
+
+	return facets, nil
+}
+
 // GetCategories retrieves all active categories
 func (s *Service) GetCategories() ([]models.Category, error) {
 	var categories []models.Category

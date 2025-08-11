@@ -1,25 +1,32 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Product, apiClient } from '@/lib/api';
+import { Product, apiClient, AdvancedSearchResponse } from '@/lib/api';
 import { ProductGrid } from '../products/ProductGrid';
 
 interface SearchResultsProps {
   query: string;
   onAddToCart?: (productId: string) => void;
+  useAdvancedSearch?: boolean;
 }
 
-export const SearchResults: React.FC<SearchResultsProps> = ({ query, onAddToCart }) => {
+export const SearchResults: React.FC<SearchResultsProps> = ({ 
+  query, 
+  onAddToCart,
+  useAdvancedSearch = false 
+}) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
 
   useEffect(() => {
     const searchProducts = async () => {
       if (!query.trim()) {
         setProducts([]);
         setTotal(0);
+        setSuggestions([]);
         return;
       }
 
@@ -27,9 +34,21 @@ export const SearchResults: React.FC<SearchResultsProps> = ({ query, onAddToCart
         setLoading(true);
         setError(null);
         
-        const response = await apiClient.searchProducts(query, 1, 20);
-        setProducts(response.products);
-        setTotal(response.total);
+        if (useAdvancedSearch) {
+          const response = await apiClient.advancedSearchProducts({
+            query,
+            page: 1,
+            pageSize: 20,
+            includeFacets: false,
+          });
+          setProducts(response.products);
+          setTotal(response.total);
+          setSuggestions(response.suggestions || []);
+        } else {
+          const response = await apiClient.searchProducts(query, 1, 20);
+          setProducts(response.products);
+          setTotal(response.total);
+        }
       } catch (err) {
         console.error('Error searching products:', err);
         setError('Failed to search products');
@@ -40,7 +59,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({ query, onAddToCart
 
     const debounceTimer = setTimeout(searchProducts, 300);
     return () => clearTimeout(debounceTimer);
-  }, [query]);
+  }, [query, useAdvancedSearch]);
 
   if (!query.trim()) {
     return null;
@@ -63,6 +82,24 @@ export const SearchResults: React.FC<SearchResultsProps> = ({ query, onAddToCart
         <p className="text-gray-600">
           {loading ? 'Searching...' : `Found ${total} products`}
         </p>
+        
+        {/* Show suggestions if available and no results */}
+        {suggestions.length > 0 && products.length === 0 && !loading && (
+          <div className="mt-4">
+            <p className="text-sm text-gray-600 mb-2">Did you mean:</p>
+            <div className="flex flex-wrap gap-2">
+              {suggestions.map((suggestion, index) => (
+                <button
+                  key={index}
+                  className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200"
+                  onClick={() => window.location.href = `/products?search=${encodeURIComponent(suggestion)}`}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       
       <ProductGrid 

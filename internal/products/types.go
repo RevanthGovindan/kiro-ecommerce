@@ -59,3 +59,52 @@ type AdminProductListResponse struct {
 	HasNext     bool             `json:"hasNext"`
 	HasPrevious bool             `json:"hasPrevious"`
 }
+
+// Advanced Search Types
+
+// AdvancedSearchFilters represents filters for advanced product search
+type AdvancedSearchFilters struct {
+	CategoryID *string
+	MinPrice   *float64
+	MaxPrice   *float64
+	InStock    *bool
+	Search     *string
+}
+
+// AdvancedSearchSort represents sorting options for advanced search
+type AdvancedSearchSort struct {
+	Field string // name, price, created_at, popularity
+	Order string // asc, desc
+}
+
+// AdvancedSearchResponse represents advanced search response with facets
+type AdvancedSearchResponse struct {
+	Products    []models.Product `json:"products"`
+	Total       int64            `json:"total"`
+	Page        int              `json:"page"`
+	PageSize    int              `json:"pageSize"`
+	TotalPages  int              `json:"totalPages"`
+	Suggestions []string         `json:"suggestions,omitempty"`
+	Facets      *SearchFacets    `json:"facets,omitempty"`
+}
+
+// SearchFacets represents search facets for filtering
+type SearchFacets struct {
+	Categories  []CategoryFacet   `json:"categories"`
+	PriceRanges []PriceRangeFacet `json:"priceRanges"`
+}
+
+// CategoryFacet represents a category facet
+type CategoryFacet struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Count int64  `json:"count"`
+}
+
+// PriceRangeFacet represents a price range facet
+type PriceRangeFacet struct {
+	Range string  `json:"range"`
+	Min   float64 `json:"min"`
+	Max   float64 `json:"max"`
+	Count int64   `json:"count"`
+}

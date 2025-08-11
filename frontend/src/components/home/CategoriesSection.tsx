@@ -53,7 +53,7 @@ export const CategoriesSection: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-8">
           <h2 className="text-3xl font-bold text-gray-900 mb-4">Shop by Category</h2>
-          <p className="text-lg text-gray-600">Find exactly what you're looking for</p>
+          <p className="text-lg text-gray-600">Find exactly what you&apos;re looking for</p>
         </div>
         
         <CategoryList categories={categories} loading={loading} />
@@ -64,7 +64,7 @@ export const CategoriesSection: React.FC = () => {
               href="/products" 
               className="text-blue-600 hover:text-blue-800 font-medium underline"
             >
-              View all categories &rarr;
+              View all categories →
             </Link>
           </div>
         )}

@@ -120,6 +120,82 @@ func (h *Handler) SearchProducts(c *gin.Context) {
 	utils.SuccessResponse(c, http.StatusOK, "Search completed successfully", response)
 }
 
+// AdvancedSearchProducts handles GET /api/products/advanced-search
+func (h *Handler) AdvancedSearchProducts(c *gin.Context) {
+	// Parse pagination parameters
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	includeFacets, _ := strconv.ParseBool(c.DefaultQuery("include_facets", "false"))
+
+	// Parse filters
+	filters := AdvancedSearchFilters{}
+
+	if categoryID := c.Query("category_id"); categoryID != "" {
+		filters.CategoryID = &categoryID
+	}
+
+	if minPriceStr := c.Query("min_price"); minPriceStr != "" {
+		if minPrice, err := strconv.ParseFloat(minPriceStr, 64); err == nil {
+			filters.MinPrice = &minPrice
+		}
+	}
+
+	if maxPriceStr := c.Query("max_price"); maxPriceStr != "" {
+		if maxPrice, err := strconv.ParseFloat(maxPriceStr, 64); err == nil {
+			filters.MaxPrice = &maxPrice
+		}
+	}
+
+	if inStockStr := c.Query("in_stock"); inStockStr != "" {
+		if inStock, err := strconv.ParseBool(inStockStr); err == nil {
+			filters.InStock = &inStock
+		}
+	}
+
+	if search := c.Query("q"); search != "" {
+		filters.Search = &search
+	}
+
+	// Parse sorting
+	sort := AdvancedSearchSort{
+		Field: c.DefaultQuery("sort_by", "created_at"),
+		Order: c.DefaultQuery("sort_order", "desc"),
+	}
+
+	// Perform advanced search
+	response, err := h.service.AdvancedSearchProducts(filters, sort, page, pageSize, includeFacets)
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, "ADVANCED_SEARCH_ERROR", "Failed to perform advanced search", err.Error())
+		return
+	}
+
+	utils.SuccessResponse(c, http.StatusOK, "Advanced search completed successfully", response)
+}
+
+// GetSearchSuggestions handles GET /api/products/suggestions
+func (h *Handler) GetSearchSuggestions(c *gin.Context) {
+	query := c.Query("q")
+	if query == "" {
+		utils.ErrorResponse(c, http.StatusBadRequest, "MISSING_QUERY", "Query parameter is required", nil)
+		return
+	}
+
+	size, _ := strconv.Atoi(c.DefaultQuery("size", "5"))
+	if size <= 0 || size > 20 {
+		size = 5
+	}
+
+	suggestions, err := h.service.GetSearchSuggestions(query, size)
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, "SUGGESTIONS_ERROR", "Failed to get suggestions", err.Error())
+		return
+	}
+
+	utils.SuccessResponse(c, http.StatusOK, "Suggestions retrieved successfully", gin.H{
+		"suggestions": suggestions,
+	})
+}
+
 // GetCategories handles GET /api/categories
 func (h *Handler) GetCategories(c *gin.Context) {
 	categories, err := h.service.GetCategories()

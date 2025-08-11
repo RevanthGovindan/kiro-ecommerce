@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Product, Category, apiClient } from '@/lib/api';
 import { Header } from '@/components/layout/Header';
@@ -8,7 +8,7 @@ import { ProductGrid } from '@/components/products/ProductGrid';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 
-export default function ProductsPage() {
+function ProductsPageContent() {
   const searchParams = useSearchParams();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -249,6 +249,7 @@ export default function ProductsPage() {
             products={products} 
             onAddToCart={handleAddToCart}
             loading={loading}
+            viewMode={viewMode}
           />
         )}
 
@@ -290,5 +291,13 @@ export default function ProductsPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function ProductsPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <ProductsPageContent />
+    </Suspense>
   );
 }

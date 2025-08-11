@@ -13,6 +13,8 @@ func SetupRoutes(router *gin.Engine, handler *Handler, authService *auth.Service
 	{
 		products.GET("", handler.GetProducts)
 		products.GET("/search", handler.SearchProducts)
+		products.GET("/advanced-search", handler.AdvancedSearchProducts)
+		products.GET("/suggestions", handler.GetSearchSuggestions)
 		products.GET("/:id", handler.GetProductByID)
 	}
 

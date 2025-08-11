@@ -13,9 +13,9 @@ jest.mock('next/link', () => {
 });
 
 jest.mock('next/image', () => {
-  const MockImage = ({ src, alt, ...props }: { src: string; alt: string; [key: string]: unknown }) => (
+  const MockImage = ({ src, alt, fill, ...props }: { src: string; alt: string; fill?: boolean; [key: string]: unknown }) => (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt={alt} {...props} />
+    <img src={src} alt={alt} data-fill={fill} {...props} />
   );
   MockImage.displayName = 'MockImage';
   return MockImage;
@@ -37,8 +37,8 @@ const mockProduct: Product = {
 };
 
 describe('ProductCard', () => {
-  it('renders product information correctly', () => {
-    render(<ProductCard product={mockProduct} />);
+  it('renders product information correctly in grid view', () => {
+    render(<ProductCard product={mockProduct} viewMode="grid" />);
     
     expect(screen.getByText('Test Product')).toBeInTheDocument();
     expect(screen.getByText('This is a test product description')).toBeInTheDocument();
@@ -47,9 +47,19 @@ describe('ProductCard', () => {
     expect(screen.getByText('Add to Cart')).toBeInTheDocument();
   });
 
-  it('calls onAddToCart when add to cart button is clicked', () => {
+  it('renders product information correctly in list view', () => {
+    render(<ProductCard product={mockProduct} viewMode="list" />);
+    
+    expect(screen.getByText('Test Product')).toBeInTheDocument();
+    expect(screen.getByText('This is a test product description')).toBeInTheDocument();
+    expect(screen.getByText('$99.99')).toBeInTheDocument();
+    expect(screen.getByText('$129.99')).toBeInTheDocument();
+    expect(screen.getByText('Add to Cart')).toBeInTheDocument();
+  });
+
+  it('calls onAddToCart when add to cart button is clicked in grid view', () => {
     const mockOnAddToCart = jest.fn();
-    render(<ProductCard product={mockProduct} onAddToCart={mockOnAddToCart} />);
+    render(<ProductCard product={mockProduct} onAddToCart={mockOnAddToCart} viewMode="grid" />);
     
     const addToCartButton = screen.getByText('Add to Cart');
     fireEvent.click(addToCartButton);
@@ -57,37 +67,76 @@ describe('ProductCard', () => {
     expect(mockOnAddToCart).toHaveBeenCalledWith('1');
   });
 
-  it('shows out of stock when inventory is 0', () => {
+  it('calls onAddToCart when add to cart button is clicked in list view', () => {
+    const mockOnAddToCart = jest.fn();
+    render(<ProductCard product={mockProduct} onAddToCart={mockOnAddToCart} viewMode="list" />);
+    
+    const addToCartButton = screen.getByText('Add to Cart');
+    fireEvent.click(addToCartButton);
+    
+    expect(mockOnAddToCart).toHaveBeenCalledWith('1');
+  });
+
+  it('shows out of stock when inventory is 0 in grid view', () => {
     const outOfStockProduct = { ...mockProduct, inventory: 0 };
-    render(<ProductCard product={outOfStockProduct} />);
+    render(<ProductCard product={outOfStockProduct} viewMode="grid" />);
     
     expect(screen.getAllByText('Out of Stock')).toHaveLength(2);
     expect(screen.getByRole('button', { name: /out of stock/i })).toBeDisabled();
   });
 
-  it('shows low stock warning when inventory is 5 or less', () => {
+  it('shows out of stock when inventory is 0 in list view', () => {
+    const outOfStockProduct = { ...mockProduct, inventory: 0 };
+    render(<ProductCard product={outOfStockProduct} viewMode="list" />);
+    
+    expect(screen.getAllByText('Out of Stock')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: /out of stock/i })).toBeDisabled();
+  });
+
+  it('shows low stock warning when inventory is 5 or less in grid view', () => {
     const lowStockProduct = { ...mockProduct, inventory: 3 };
-    render(<ProductCard product={lowStockProduct} />);
+    render(<ProductCard product={lowStockProduct} viewMode="grid" />);
     
     expect(screen.getByText('Only 3 left in stock')).toBeInTheDocument();
   });
 
-  it('renders product image with correct alt text', () => {
-    render(<ProductCard product={mockProduct} />);
+  it('shows low stock warning when inventory is 5 or less in list view', () => {
+    const lowStockProduct = { ...mockProduct, inventory: 3 };
+    render(<ProductCard product={lowStockProduct} viewMode="list" />);
+    
+    expect(screen.getByText('Only 3 left')).toBeInTheDocument();
+  });
+
+  it('renders product image with correct alt text in grid view', () => {
+    render(<ProductCard product={mockProduct} viewMode="grid" />);
     
     const image = screen.getByAltText('Test Product');
     expect(image).toBeInTheDocument();
     expect(image).toHaveAttribute('src', '/test-image.jpg');
   });
 
-  it('links to product detail page', () => {
-    render(<ProductCard product={mockProduct} />);
+  it('renders product image with correct alt text in list view', () => {
+    render(<ProductCard product={mockProduct} viewMode="list" />);
     
-    const productLinks = screen.getAllByRole('link');
-    const productNameLink = productLinks.find(link => 
+    const image = screen.getByAltText('Test Product');
+    expect(image).toBeInTheDocument();
+    expect(image).toHaveAttribute('src', '/test-image.jpg');
+  });
+
+  it('links to product detail page in both views', () => {
+    const { rerender } = render(<ProductCard product={mockProduct} viewMode="grid" />);
+    
+    let productLinks = screen.getAllByRole('link');
+    let productNameLink = productLinks.find(link => 
       link.getAttribute('href') === '/products/1'
     );
-    
+    expect(productNameLink).toBeInTheDocument();
+
+    rerender(<ProductCard product={mockProduct} viewMode="list" />);
+    productLinks = screen.getAllByRole('link');
+    productNameLink = productLinks.find(link => 
+      link.getAttribute('href') === '/products/1'
+    );
     expect(productNameLink).toBeInTheDocument();
   });
 });
