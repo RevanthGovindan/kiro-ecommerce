@@ -75,12 +75,32 @@ func NewElasticsearchService() (*ElasticsearchService, error) {
 
 	service := &ElasticsearchService{client: client}
 
+	// Test connection and initialize index
+	if err := service.testConnection(); err != nil {
+		return nil, fmt.Errorf("failed to connect to Elasticsearch: %w", err)
+	}
+
 	// Initialize index
 	if err := service.initializeIndex(); err != nil {
 		log.Printf("Warning: Failed to initialize Elasticsearch index: %v", err)
 	}
 
 	return service, nil
+}
+
+func (es *ElasticsearchService) testConnection() error {
+	req := esapi.InfoRequest{}
+	res, err := req.Do(context.Background(), es.client)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return fmt.Errorf("Elasticsearch connection test failed: %s", res.String())
+	}
+
+	return nil
 }
 
 func (es *ElasticsearchService) initializeIndex() error {
@@ -194,7 +214,7 @@ func (es *ElasticsearchService) IndexProduct(product *models.Product) error {
 	}
 
 	// Add category name if available
-	if product.Category != nil {
+	if product.Category.ID != "" {
 		doc["categoryName"] = product.Category.Name
 	}
 

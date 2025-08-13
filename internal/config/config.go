@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 )
 
 type Config struct {
@@ -16,6 +17,9 @@ type Config struct {
 	SMTPUsername   string
 	SMTPPassword   string
 	FromEmail      string
+	CDNBaseURL     string
+	MaxRequestSize int64
+	Environment    string
 }
 
 func Load() *Config {
@@ -31,12 +35,24 @@ func Load() *Config {
 		SMTPUsername:   getEnv("SMTP_USERNAME", ""),
 		SMTPPassword:   getEnv("SMTP_PASSWORD", ""),
 		FromEmail:      getEnv("FROM_EMAIL", ""),
+		CDNBaseURL:     getEnv("CDN_BASE_URL", ""),
+		MaxRequestSize: getEnvInt64("MAX_REQUEST_SIZE", 10*1024*1024), // 10MB default
+		Environment:    getEnv("ENVIRONMENT", "development"),
 	}
 }
 
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return defaultValue
+}
+
+func getEnvInt64(key string, defaultValue int64) int64 {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil {
+			return parsed
+		}
 	}
 	return defaultValue
 }

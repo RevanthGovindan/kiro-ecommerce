@@ -3,6 +3,7 @@ package search
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"ecommerce-website/internal/models"
 
@@ -181,7 +182,7 @@ func (s *Service) fallbackDatabaseSuggestions(query string, size int) ([]string,
 	}
 
 	var products []models.Product
-	searchTerm := query + "%"
+	searchTerm := strings.ToLower(query) + "%"
 
 	if err := s.db.Select("name").
 		Where("is_active = ? AND LOWER(name) LIKE ?", true, searchTerm).

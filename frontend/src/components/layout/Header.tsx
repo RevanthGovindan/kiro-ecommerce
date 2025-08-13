@@ -19,8 +19,13 @@ export const Header: React.FC<HeaderProps> = ({ onSearch }) => {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (onSearch && searchQuery.trim()) {
-      onSearch(searchQuery.trim());
+    if (searchQuery.trim()) {
+      if (onSearch) {
+        onSearch(searchQuery.trim());
+      } else {
+        // Default behavior: navigate to search page
+        window.location.href = `/search?q=${encodeURIComponent(searchQuery.trim())}`;
+      }
     }
   };
 

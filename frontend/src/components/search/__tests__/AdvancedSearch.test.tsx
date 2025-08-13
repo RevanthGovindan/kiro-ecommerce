@@ -240,7 +240,8 @@ describe('AdvancedSearch', () => {
     await waitFor(() => {
       expect(screen.getByText('Categories')).toBeInTheDocument();
       expect(screen.getByText('Price Ranges')).toBeInTheDocument();
-      expect(screen.getByText('Electronics')).toBeInTheDocument();
+      // Check for facet-specific Electronics (with count)
+      expect(screen.getByText('(5)')).toBeInTheDocument();
       expect(screen.getByText('$0-25')).toBeInTheDocument();
     });
   });

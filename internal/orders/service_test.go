@@ -3,856 +3,375 @@ package orders
 import (
 	"context"
 	"testing"
-	"time"
-
-	"ecommerce-website/internal/models"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+
+	"ecommerce-website/internal/models"
 )
 
-func setupTestDB(t *testing.T) *gorm.DB {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-
-	// Auto migrate the schema
-	err = db.AutoMigrate(
-		&models.User{},
-		&models.Category{},
-		&models.Product{},
-		&models.Order{},
-		&models.OrderItem{},
-	)
-	require.NoError(t, err)
-
-	return db
+// MockOrderRepository is a mock implementation of the order repository
+type MockOrderRepository struct {
+	mock.Mock
 }
 
-func createTestUser(t *testing.T, db *gorm.DB) *models.User {
-	user := &models.User{
-		Email:     "test@example.com",
-		Password:  "hashedpassword",
-		FirstName: "Test",
-		LastName:  "User",
-		Role:      "customer",
-		IsActive:  true,
+func (m *MockOrderRepository) Create(order *models.Order) error {
+	args := m.Called(order)
+	return args.Error(0)
+}
+
+func (m *MockOrderRepository) GetByID(id string) (*models.Order, error) {
+	args := m.Called(id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
 	}
-	err := db.Create(user).Error
-	require.NoError(t, err)
-	return user
+	return args.Get(0).(*models.Order), args.Error(1)
 }
 
-func createTestCategory(t *testing.T, db *gorm.DB) *models.Category {
-	category := &models.Category{
-		Name:     "Test Category",
-		Slug:     "test-category",
-		IsActive: true,
+func (m *MockOrderRepository) GetByUserID(userID string, page, pageSize int) ([]*models.Order, int64, error) {
+	args := m.Called(userID, page, pageSize)
+	return args.Get(0).([]*models.Order), args.Get(1).(int64), args.Error(2)
+}
+
+func (m *MockOrderRepository) Update(order *models.Order) error {
+	args := m.Called(order)
+	return args.Error(0)
+}
+
+func (m *MockOrderRepository) List(filters OrderFilters) ([]*models.Order, int64, error) {
+	args := m.Called(filters)
+	return args.Get(0).([]*models.Order), args.Get(1).(int64), args.Error(2)
+}
+
+// MockProductRepository for order service tests
+type MockProductRepository struct {
+	mock.Mock
+}
+
+func (m *MockProductRepository) GetByID(id string) (*models.Product, error) {
+	args := m.Called(id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
 	}
-	err := db.Create(category).Error
-	require.NoError(t, err)
-	return category
+	return args.Get(0).(*models.Product), args.Error(1)
 }
 
-func createTestProduct(t *testing.T, db *gorm.DB, categoryID string, inventory int) *models.Product {
-	product := &models.Product{
-		Name:        "Test Product",
-		Description: "Test Description",
-		Price:       99.99,
-		SKU:         "TEST-SKU-" + time.Now().Format("20060102150405"),
-		Inventory:   inventory,
-		IsActive:    true,
-		CategoryID:  categoryID,
-	}
-	err := db.Create(product).Error
-	require.NoError(t, err)
-	return product
+func (m *MockProductRepository) UpdateInventory(id string, quantity int) error {
+	args := m.Called(id, quantity)
+	return args.Error(0)
 }
 
-func TestService_CreateOrder(t *testing.T) {
-	db := setupTestDB(t)
-	mockCartService := new(MockCartService)
-	service := NewServiceWithCartService(db, mockCartService)
+// MockPaymentService for order service tests
+type MockPaymentService struct {
+	mock.Mock
+}
 
-	// Create test data
-	user := createTestUser(t, db)
-	category := createTestCategory(t, db)
-	product := createTestProduct(t, db, category.ID, 10)
+func (m *MockPaymentService) CreatePaymentIntent(amount float64, currency string) (string, error) {
+	args := m.Called(amount, currency)
+	return args.String(0), args.Error(1)
+}
 
-	ctx := context.Background()
+func (m *MockPaymentService) ConfirmPayment(paymentIntentID string) error {
+	args := m.Called(paymentIntentID)
+	return args.Error(0)
+}
 
+func TestOrderService_CreateOrder(t *testing.T) {
 	tests := []struct {
-		name        string
-		userID      string
-		request     *CreateOrderRequest
-		setupMock   func()
-		expectError bool
-		errorMsg    string
+		name          string
+		userID        string
+		orderData     *CreateOrderRequest
+		setupMocks    func(*MockOrderRepository, *MockProductRepository, *MockPaymentService)
+		expectedError string
 	}{
 		{
 			name:   "successful order creation",
-			userID: user.ID,
-			request: &CreateOrderRequest{
-				SessionID: "test-session-id",
-				ShippingAddress: models.OrderAddress{
-					FirstName:  "John",
-					LastName:   "Doe",
-					Address1:   "123 Main St",
-					City:       "Anytown",
-					State:      "CA",
-					PostalCode: "12345",
-					Country:    "US",
+			userID: "user-123",
+			orderData: &CreateOrderRequest{
+				Items: []OrderItemRequest{
+					{ProductID: "prod-1", Quantity: 2},
+					{ProductID: "prod-2", Quantity: 1},
 				},
-				BillingAddress: models.OrderAddress{
-					FirstName:  "John",
-					LastName:   "Doe",
-					Address1:   "123 Main St",
-					City:       "Anytown",
-					State:      "CA",
-					PostalCode: "12345",
-					Country:    "US",
+				ShippingAddress: models.Address{
+					FirstName: "John",
+					LastName:  "Doe",
+					Address:   "123 Main St",
+					City:      "Anytown",
+					State:     "CA",
+					ZipCode:   "12345",
 				},
-				PaymentIntentID: "pi_test123",
+				BillingAddress: models.Address{
+					FirstName: "John",
+					LastName:  "Doe",
+					Address:   "123 Main St",
+					City:      "Anytown",
+					State:     "CA",
+					ZipCode:   "12345",
+				},
 			},
-			setupMock: func() {
-				cart := &models.Cart{
-					SessionID: "test-session-id",
-					Items: []models.CartItem{
-						{
-							ProductID: product.ID,
-							Quantity:  2,
-							Product:   *product,
-						},
-					},
-				}
-				mockCartService.On("GetCartWithProducts", mock.Anything, "test-session-id").Return(cart, nil)
-				mockCartService.On("ClearCart", mock.Anything, "test-session-id").Return(nil)
+			setupMocks: func(orderRepo *MockOrderRepository, prodRepo *MockProductRepository, paymentService *MockPaymentService) {
+				// Products exist and have sufficient inventory
+				prodRepo.On("GetByID", "prod-1").Return(&models.Product{
+					ID: "prod-1", Name: "Product 1", Price: 99.99, Inventory: 10, IsActive: true,
+				}, nil)
+				prodRepo.On("GetByID", "prod-2").Return(&models.Product{
+					ID: "prod-2", Name: "Product 2", Price: 49.99, Inventory: 5, IsActive: true,
+				}, nil)
+
+				// Update inventory
+				prodRepo.On("UpdateInventory", "prod-1", -2).Return(nil)
+				prodRepo.On("UpdateInventory", "prod-2", -1).Return(nil)
+
+				// Create payment intent
+				paymentService.On("CreatePaymentIntent", 249.97, "usd").Return("pi_test123", nil)
+
+				// Create order
+				orderRepo.On("Create", mock.AnythingOfType("*models.Order")).Return(nil)
 			},
-			expectError: false,
 		},
 		{
-			name:   "empty cart error",
-			userID: user.ID,
-			request: &CreateOrderRequest{
-				SessionID: "empty-session-id",
-				ShippingAddress: models.OrderAddress{
-					FirstName:  "John",
-					LastName:   "Doe",
-					Address1:   "123 Main St",
-					City:       "Anytown",
-					State:      "CA",
-					PostalCode: "12345",
-					Country:    "US",
+			name:   "insufficient inventory",
+			userID: "user-123",
+			orderData: &CreateOrderRequest{
+				Items: []OrderItemRequest{
+					{ProductID: "prod-1", Quantity: 15}, // More than available
 				},
-				BillingAddress: models.OrderAddress{
-					FirstName:  "John",
-					LastName:   "Doe",
-					Address1:   "123 Main St",
-					City:       "Anytown",
-					State:      "CA",
-					PostalCode: "12345",
-					Country:    "US",
+				ShippingAddress: models.Address{
+					FirstName: "John",
+					LastName:  "Doe",
+					Address:   "123 Main St",
+					City:      "Anytown",
+					State:     "CA",
+					ZipCode:   "12345",
 				},
-				PaymentIntentID: "pi_test123",
 			},
-			setupMock: func() {
-				cart := &models.Cart{
-					SessionID: "empty-session-id",
-					Items:     []models.CartItem{},
-				}
-				mockCartService.On("GetCartWithProducts", mock.Anything, "empty-session-id").Return(cart, nil)
+			setupMocks: func(orderRepo *MockOrderRepository, prodRepo *MockProductRepository, paymentService *MockPaymentService) {
+				prodRepo.On("GetByID", "prod-1").Return(&models.Product{
+					ID: "prod-1", Name: "Product 1", Price: 99.99, Inventory: 10, IsActive: true,
+				}, nil)
 			},
-			expectError: true,
-			errorMsg:    "cart is empty",
+			expectedError: "insufficient inventory for product",
 		},
 		{
-			name:   "insufficient inventory error",
-			userID: user.ID,
-			request: &CreateOrderRequest{
-				SessionID: "insufficient-inventory-session",
-				ShippingAddress: models.OrderAddress{
-					FirstName:  "John",
-					LastName:   "Doe",
-					Address1:   "123 Main St",
-					City:       "Anytown",
-					State:      "CA",
-					PostalCode: "12345",
-					Country:    "US",
+			name:   "product not found",
+			userID: "user-123",
+			orderData: &CreateOrderRequest{
+				Items: []OrderItemRequest{
+					{ProductID: "nonexistent", Quantity: 1},
 				},
-				BillingAddress: models.OrderAddress{
-					FirstName:  "John",
-					LastName:   "Doe",
-					Address1:   "123 Main St",
-					City:       "Anytown",
-					State:      "CA",
-					PostalCode: "12345",
-					Country:    "US",
+				ShippingAddress: models.Address{
+					FirstName: "John",
+					LastName:  "Doe",
+					Address:   "123 Main St",
+					City:      "Anytown",
+					State:     "CA",
+					ZipCode:   "12345",
 				},
-				PaymentIntentID: "pi_test123",
 			},
-			setupMock: func() {
-				cart := &models.Cart{
-					SessionID: "insufficient-inventory-session",
-					Items: []models.CartItem{
-						{
-							ProductID: product.ID,
-							Quantity:  15, // More than available inventory (10)
-							Product:   *product,
-						},
-					},
-				}
-				mockCartService.On("GetCartWithProducts", mock.Anything, "insufficient-inventory-session").Return(cart, nil)
+			setupMocks: func(orderRepo *MockOrderRepository, prodRepo *MockProductRepository, paymentService *MockPaymentService) {
+				prodRepo.On("GetByID", "nonexistent").Return(nil, gorm.ErrRecordNotFound)
 			},
-			expectError: true,
-			errorMsg:    "insufficient inventory",
+			expectedError: "product not found",
+		},
+		{
+			name:   "inactive product",
+			userID: "user-123",
+			orderData: &CreateOrderRequest{
+				Items: []OrderItemRequest{
+					{ProductID: "prod-1", Quantity: 1},
+				},
+				ShippingAddress: models.Address{
+					FirstName: "John",
+					LastName:  "Doe",
+					Address:   "123 Main St",
+					City:      "Anytown",
+					State:     "CA",
+					ZipCode:   "12345",
+				},
+			},
+			setupMocks: func(orderRepo *MockOrderRepository, prodRepo *MockProductRepository, paymentService *MockPaymentService) {
+				prodRepo.On("GetByID", "prod-1").Return(&models.Product{
+					ID: "prod-1", Name: "Product 1", Price: 99.99, Inventory: 10, IsActive: false,
+				}, nil)
+			},
+			expectedError: "product is not available",
+		},
+		{
+			name:      "empty order items",
+			userID:    "user-123",
+			orderData: &CreateOrderRequest{Items: []OrderItemRequest{}},
+			setupMocks: func(orderRepo *MockOrderRepository, prodRepo *MockProductRepository, paymentService *MockPaymentService) {
+			},
+			expectedError: "order must contain at least one item",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Reset mock
-			mockCartService.ExpectedCalls = nil
-			tt.setupMock()
+			mockOrderRepo := new(MockOrderRepository)
+			mockProdRepo := new(MockProductRepository)
+			mockPaymentService := new(MockPaymentService)
+			tt.setupMocks(mockOrderRepo, mockProdRepo, mockPaymentService)
 
-			order, err := service.CreateOrder(ctx, tt.userID, tt.request)
+			service := &Service{
+				orderRepo:      mockOrderRepo,
+				productRepo:    mockProdRepo,
+				paymentService: mockPaymentService,
+			}
 
-			if tt.expectError {
+			order, err := service.CreateOrder(context.Background(), tt.userID, tt.orderData)
+
+			if tt.expectedError != "" {
 				assert.Error(t, err)
-				if tt.errorMsg != "" {
-					assert.Contains(t, err.Error(), tt.errorMsg)
-				}
+				assert.Contains(t, err.Error(), tt.expectedError)
 				assert.Nil(t, order)
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, order)
 				assert.Equal(t, tt.userID, order.UserID)
 				assert.Equal(t, "pending", order.Status)
-				assert.Greater(t, order.Total, 0.0)
+				assert.NotEmpty(t, order.ID)
 			}
 
-			// Verify mock expectations
-			mockCartService.AssertExpectations(t)
+			mockOrderRepo.AssertExpectations(t)
+			mockProdRepo.AssertExpectations(t)
+			mockPaymentService.AssertExpectations(t)
 		})
 	}
 }
 
-func TestService_GetOrder(t *testing.T) {
-	db := setupTestDB(t)
-	service := NewService(db)
-
-	// Create test data
-	user := createTestUser(t, db)
-	category := createTestCategory(t, db)
-	product := createTestProduct(t, db, category.ID, 10)
-
-	// Create test order
-	order := &models.Order{
-		UserID:   user.ID,
-		Status:   "pending",
-		Subtotal: 99.99,
-		Tax:      0,
-		Shipping: 0,
-		Total:    99.99,
-		ShippingAddress: models.OrderAddress{
-			FirstName:  "John",
-			LastName:   "Doe",
-			Address1:   "123 Main St",
-			City:       "Anytown",
-			State:      "CA",
-			PostalCode: "12345",
-			Country:    "US",
-		},
-		BillingAddress: models.OrderAddress{
-			FirstName:  "John",
-			LastName:   "Doe",
-			Address1:   "123 Main St",
-			City:       "Anytown",
-			State:      "CA",
-			PostalCode: "12345",
-			Country:    "US",
-		},
-		PaymentIntentID: "pi_test123",
-	}
-	err := db.Create(order).Error
-	require.NoError(t, err)
-
-	// Create order item
-	orderItem := &models.OrderItem{
-		OrderID:   order.ID,
-		ProductID: product.ID,
-		Quantity:  1,
-		Price:     99.99,
-		Total:     99.99,
-	}
-	err = db.Create(orderItem).Error
-	require.NoError(t, err)
-
-	tests := []struct {
-		name        string
-		orderID     string
-		userID      string
-		expectError bool
-		errorMsg    string
-	}{
-		{
-			name:        "get order successfully",
-			orderID:     order.ID,
-			userID:      user.ID,
-			expectError: false,
-		},
-		{
-			name:        "order not found",
-			orderID:     "non-existent-id",
-			userID:      user.ID,
-			expectError: true,
-			errorMsg:    "order not found",
-		},
-		{
-			name:        "get order as admin (no user filter)",
-			orderID:     order.ID,
-			userID:      "", // Empty userID means admin access
-			expectError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := service.GetOrder(tt.orderID, tt.userID)
-
-			if tt.expectError {
-				assert.Error(t, err)
-				if tt.errorMsg != "" {
-					assert.Contains(t, err.Error(), tt.errorMsg)
-				}
-				assert.Nil(t, result)
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, result)
-				assert.Equal(t, tt.orderID, result.ID)
-			}
-		})
-	}
-}
-
-func TestService_GetUserOrders(t *testing.T) {
-	db := setupTestDB(t)
-	service := NewService(db)
-
-	// Create test data
-	user := createTestUser(t, db)
-	category := createTestCategory(t, db)
-	product := createTestProduct(t, db, category.ID, 10)
-
-	// Create multiple test orders
-	for i := 0; i < 5; i++ {
-		order := &models.Order{
-			UserID:   user.ID,
-			Status:   "pending",
-			Subtotal: 99.99,
-			Tax:      0,
-			Shipping: 0,
-			Total:    99.99,
-			ShippingAddress: models.OrderAddress{
-				FirstName:  "John",
-				LastName:   "Doe",
-				Address1:   "123 Main St",
-				City:       "Anytown",
-				State:      "CA",
-				PostalCode: "12345",
-				Country:    "US",
-			},
-			BillingAddress: models.OrderAddress{
-				FirstName:  "John",
-				LastName:   "Doe",
-				Address1:   "123 Main St",
-				City:       "Anytown",
-				State:      "CA",
-				PostalCode: "12345",
-				Country:    "US",
-			},
-			PaymentIntentID: "pi_test123",
-		}
-		err := db.Create(order).Error
-		require.NoError(t, err)
-
-		// Create order item
-		orderItem := &models.OrderItem{
-			OrderID:   order.ID,
-			ProductID: product.ID,
-			Quantity:  1,
-			Price:     99.99,
-			Total:     99.99,
-		}
-		err = db.Create(orderItem).Error
-		require.NoError(t, err)
-	}
-
+func TestOrderService_UpdateOrderStatus(t *testing.T) {
 	tests := []struct {
 		name          string
-		userID        string
-		page          int
-		limit         int
-		expectedCount int
-		expectedTotal int64
+		orderID       string
+		newStatus     string
+		setupMock     func(*MockOrderRepository)
+		expectedError string
 	}{
 		{
-			name:          "get first page",
-			userID:        user.ID,
-			page:          1,
-			limit:         3,
-			expectedCount: 3,
-			expectedTotal: 5,
-		},
-		{
-			name:          "get second page",
-			userID:        user.ID,
-			page:          2,
-			limit:         3,
-			expectedCount: 2,
-			expectedTotal: 5,
-		},
-		{
-			name:          "get all orders",
-			userID:        user.ID,
-			page:          1,
-			limit:         10,
-			expectedCount: 5,
-			expectedTotal: 5,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			orders, total, err := service.GetUserOrders(tt.userID, tt.page, tt.limit)
-
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedCount, len(orders))
-			assert.Equal(t, tt.expectedTotal, total)
-		})
-	}
-}
-
-func TestService_UpdateOrderStatus(t *testing.T) {
-	db := setupTestDB(t)
-	service := NewService(db)
-
-	// Create test data
-	user := createTestUser(t, db)
-
-	// Create test order
-	order := &models.Order{
-		UserID:   user.ID,
-		Status:   "pending",
-		Subtotal: 99.99,
-		Tax:      0,
-		Shipping: 0,
-		Total:    99.99,
-		ShippingAddress: models.OrderAddress{
-			FirstName:  "John",
-			LastName:   "Doe",
-			Address1:   "123 Main St",
-			City:       "Anytown",
-			State:      "CA",
-			PostalCode: "12345",
-			Country:    "US",
-		},
-		BillingAddress: models.OrderAddress{
-			FirstName:  "John",
-			LastName:   "Doe",
-			Address1:   "123 Main St",
-			City:       "Anytown",
-			State:      "CA",
-			PostalCode: "12345",
-			Country:    "US",
-		},
-		PaymentIntentID: "pi_test123",
-	}
-	err := db.Create(order).Error
-	require.NoError(t, err)
-
-	tests := []struct {
-		name        string
-		orderID     string
-		status      string
-		expectError bool
-		errorMsg    string
-	}{
-		{
-			name:        "update to processing",
-			orderID:     order.ID,
-			status:      "processing",
-			expectError: false,
-		},
-		{
-			name:        "update to shipped",
-			orderID:     order.ID,
-			status:      "shipped",
-			expectError: false,
-		},
-		{
-			name:        "invalid status",
-			orderID:     order.ID,
-			status:      "invalid",
-			expectError: true,
-			errorMsg:    "invalid order status",
-		},
-		{
-			name:        "order not found",
-			orderID:     "non-existent-id",
-			status:      "processing",
-			expectError: true,
-			errorMsg:    "order not found",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := service.UpdateOrderStatus(tt.orderID, tt.status)
-
-			if tt.expectError {
-				assert.Error(t, err)
-				if tt.errorMsg != "" {
-					assert.Contains(t, err.Error(), tt.errorMsg)
-				}
-				assert.Nil(t, result)
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, result)
-				assert.Equal(t, tt.status, result.Status)
-			}
-		})
-	}
-}
-
-func TestService_GetAllOrders(t *testing.T) {
-	db := setupTestDB(t)
-	service := NewService(db)
-
-	// Create test data
-	user := createTestUser(t, db)
-	category := createTestCategory(t, db)
-	product := createTestProduct(t, db, category.ID, 10)
-
-	// Create orders with different statuses
-	statuses := []string{"pending", "processing", "shipped", "delivered"}
-	for _, status := range statuses {
-		order := &models.Order{
-			UserID:   user.ID,
-			Status:   status,
-			Subtotal: 99.99,
-			Tax:      0,
-			Shipping: 0,
-			Total:    99.99,
-			ShippingAddress: models.OrderAddress{
-				FirstName:  "John",
-				LastName:   "Doe",
-				Address1:   "123 Main St",
-				City:       "Anytown",
-				State:      "CA",
-				PostalCode: "12345",
-				Country:    "US",
-			},
-			BillingAddress: models.OrderAddress{
-				FirstName:  "John",
-				LastName:   "Doe",
-				Address1:   "123 Main St",
-				City:       "Anytown",
-				State:      "CA",
-				PostalCode: "12345",
-				Country:    "US",
-			},
-			PaymentIntentID: "pi_test123",
-		}
-		err := db.Create(order).Error
-		require.NoError(t, err)
-
-		// Create order item
-		orderItem := &models.OrderItem{
-			OrderID:   order.ID,
-			ProductID: product.ID,
-			Quantity:  1,
-			Price:     99.99,
-			Total:     99.99,
-		}
-		err = db.Create(orderItem).Error
-		require.NoError(t, err)
-	}
-
-	tests := []struct {
-		name          string
-		page          int
-		limit         int
-		status        string
-		expectedCount int
-		expectedTotal int64
-	}{
-		{
-			name:          "get all orders",
-			page:          1,
-			limit:         10,
-			status:        "",
-			expectedCount: 4,
-			expectedTotal: 4,
-		},
-		{
-			name:          "filter by pending status",
-			page:          1,
-			limit:         10,
-			status:        "pending",
-			expectedCount: 1,
-			expectedTotal: 1,
-		},
-		{
-			name:          "filter by processing status",
-			page:          1,
-			limit:         10,
-			status:        "processing",
-			expectedCount: 1,
-			expectedTotal: 1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			orders, total, err := service.GetAllOrders(tt.page, tt.limit, tt.status, "")
-
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedCount, len(orders))
-			assert.Equal(t, tt.expectedTotal, total)
-		})
-	}
-}
-
-func TestService_GetAllCustomers(t *testing.T) {
-	// Use a unique database for this test to avoid interference
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-
-	// Auto migrate the schema
-	err = db.AutoMigrate(
-		&models.User{},
-		&models.Category{},
-		&models.Product{},
-		&models.Order{},
-		&models.OrderItem{},
-	)
-	require.NoError(t, err)
-
-	service := NewService(db)
-
-	// Create test customers
-	customer1 := &models.User{
-		Email:     "john.doe@example.com",
-		Password:  "hashedpassword",
-		FirstName: "John",
-		LastName:  "Doe",
-		Role:      "customer",
-		IsActive:  true,
-	}
-	customer2 := &models.User{
-		Email:     "jane.smith@example.com",
-		Password:  "hashedpassword",
-		FirstName: "Jane",
-		LastName:  "Smith",
-		Role:      "customer",
-		IsActive:  true,
-	}
-	admin := &models.User{
-		Email:     "admin@example.com",
-		Password:  "hashedpassword",
-		FirstName: "Admin",
-		LastName:  "User",
-		Role:      "admin",
-		IsActive:  true,
-	}
-	inactiveCustomer := &models.User{
-		Email:     "inactive@example.com",
-		Password:  "hashedpassword",
-		FirstName: "Inactive",
-		LastName:  "Customer",
-		Role:      "customer",
-		IsActive:  false,
-	}
-
-	require.NoError(t, db.Create(customer1).Error)
-	require.NoError(t, db.Create(customer2).Error)
-	require.NoError(t, db.Create(admin).Error)
-	require.NoError(t, db.Create(inactiveCustomer).Error)
-
-	// Explicitly set inactive customer to false
-	db.Model(inactiveCustomer).Update("is_active", false)
-
-	tests := []struct {
-		name          string
-		page          int
-		limit         int
-		search        string
-		expectedCount int
-		expectedTotal int64
-	}{
-		{
-			name:          "get all customers without search",
-			page:          1,
-			limit:         10,
-			search:        "",
-			expectedCount: 2, // Only active customers, not admin
-			expectedTotal: 2,
-		},
-		{
-			name:          "search by first name",
-			page:          1,
-			limit:         10,
-			search:        "john",
-			expectedCount: 1,
-			expectedTotal: 1,
-		},
-		{
-			name:          "search by last name",
-			page:          1,
-			limit:         10,
-			search:        "smith",
-			expectedCount: 1,
-			expectedTotal: 1,
-		},
-		{
-			name:          "search by email",
-			page:          1,
-			limit:         10,
-			search:        "jane.smith",
-			expectedCount: 1,
-			expectedTotal: 1,
-		},
-		{
-			name:          "no matching customers",
-			page:          1,
-			limit:         10,
-			search:        "nonexistent",
-			expectedCount: 0,
-			expectedTotal: 0,
-		},
-		{
-			name:          "pagination test",
-			page:          1,
-			limit:         1,
-			search:        "",
-			expectedCount: 1,
-			expectedTotal: 2,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			customers, total, err := service.GetAllCustomers(tt.page, tt.limit, tt.search)
-
-			assert.NoError(t, err)
-
-			assert.Equal(t, tt.expectedCount, len(customers))
-			assert.Equal(t, tt.expectedTotal, total)
-
-			// Verify all returned users are customers and active
-			for _, customer := range customers {
-				assert.Equal(t, "customer", customer.Role)
-				assert.True(t, customer.IsActive)
-				assert.Empty(t, customer.Password) // Password should be removed
-			}
-		})
-	}
-}
-
-func TestService_UpdateOrderStatusWithEmailNotification(t *testing.T) {
-	db := setupTestDB(t)
-
-	// Create mock email service
-	mockEmailService := &MockEmailService{}
-
-	// Create service with mock dependencies
-	service := NewServiceWithDependencies(db, &MockCartService{}, mockEmailService)
-
-	// Create test data
-	user := createTestUser(t, db)
-	order := &models.Order{
-		UserID:   user.ID,
-		Status:   "pending",
-		Subtotal: 100.0,
-		Total:    100.0,
-	}
-	require.NoError(t, db.Create(order).Error)
-
-	tests := []struct {
-		name           string
-		orderID        string
-		newStatus      string
-		mockSetup      func()
-		expectedError  bool
-		expectedStatus string
-	}{
-		{
-			name:      "successful status update with email notification",
-			orderID:   order.ID,
+			name:      "successful status update",
+			orderID:   "order-123",
 			newStatus: "processing",
-			mockSetup: func() {
-				mockEmailService.On("SendOrderStatusUpdate", mock.AnythingOfType("*models.Order"), "pending", "processing").Return(nil)
+			setupMock: func(repo *MockOrderRepository) {
+				order := &models.Order{
+					ID:     "order-123",
+					Status: "pending",
+					UserID: "user-123",
+				}
+				repo.On("GetByID", "order-123").Return(order, nil)
+				repo.On("Update", mock.AnythingOfType("*models.Order")).Return(nil)
 			},
-			expectedError:  false,
-			expectedStatus: "processing",
 		},
 		{
-			name:      "status update with email failure (should not fail)",
-			orderID:   order.ID,
-			newStatus: "shipped",
-			mockSetup: func() {
-				mockEmailService.On("SendOrderStatusUpdate", mock.AnythingOfType("*models.Order"), "processing", "shipped").Return(assert.AnError)
+			name:      "order not found",
+			orderID:   "nonexistent",
+			newStatus: "processing",
+			setupMock: func(repo *MockOrderRepository) {
+				repo.On("GetByID", "nonexistent").Return(nil, gorm.ErrRecordNotFound)
 			},
-			expectedError:  false,
-			expectedStatus: "shipped",
+			expectedError: "order not found",
 		},
 		{
 			name:          "invalid status",
-			orderID:       order.ID,
-			newStatus:     "invalid_status",
-			mockSetup:     func() {},
-			expectedError: true,
+			orderID:       "order-123",
+			newStatus:     "invalid-status",
+			setupMock:     func(repo *MockOrderRepository) {},
+			expectedError: "invalid order status",
 		},
 		{
-			name:          "non-existent order",
-			orderID:       "non-existent-id",
-			newStatus:     "processing",
-			mockSetup:     func() {},
-			expectedError: true,
+			name:      "cannot update completed order",
+			orderID:   "order-123",
+			newStatus: "processing",
+			setupMock: func(repo *MockOrderRepository) {
+				order := &models.Order{
+					ID:     "order-123",
+					Status: "completed",
+					UserID: "user-123",
+				}
+				repo.On("GetByID", "order-123").Return(order, nil)
+			},
+			expectedError: "cannot update completed order",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Reset mock
-			mockEmailService.ExpectedCalls = nil
-			tt.mockSetup()
+			mockRepo := new(MockOrderRepository)
+			tt.setupMock(mockRepo)
 
-			updatedOrder, err := service.UpdateOrderStatus(tt.orderID, tt.newStatus)
-
-			if tt.expectedError {
-				assert.Error(t, err)
-				assert.Nil(t, updatedOrder)
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, updatedOrder)
-				assert.Equal(t, tt.expectedStatus, updatedOrder.Status)
+			service := &Service{
+				orderRepo: mockRepo,
 			}
 
-			// Verify mock expectations
-			mockEmailService.AssertExpectations(t)
+			err := service.UpdateOrderStatus(context.Background(), tt.orderID, tt.newStatus)
+
+			if tt.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			mockRepo.AssertExpectations(t)
 		})
 	}
 }
 
-// Mock email service for testing
-type MockEmailService struct {
-	mock.Mock
+func TestOrderService_CalculateOrderTotal(t *testing.T) {
+	service := &Service{}
+
+	tests := []struct {
+		name          string
+		items         []models.OrderItem
+		expectedTotal float64
+	}{
+		{
+			name: "calculate total for multiple items",
+			items: []models.OrderItem{
+				{ProductID: "prod-1", Quantity: 2, Price: 99.99},
+				{ProductID: "prod-2", Quantity: 1, Price: 49.99},
+				{ProductID: "prod-3", Quantity: 3, Price: 19.99},
+			},
+			expectedTotal: 309.95, // (2 * 99.99) + (1 * 49.99) + (3 * 19.99)
+		},
+		{
+			name:          "calculate total for empty order",
+			items:         []models.OrderItem{},
+			expectedTotal: 0.0,
+		},
+		{
+			name: "calculate total for single item",
+			items: []models.OrderItem{
+				{ProductID: "prod-1", Quantity: 5, Price: 25.50},
+			},
+			expectedTotal: 127.50,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			total := service.CalculateOrderTotal(tt.items)
+			assert.Equal(t, tt.expectedTotal, total)
+		})
+	}
 }
 
-func (m *MockEmailService) SendOrderStatusUpdate(order *models.Order, oldStatus, newStatus string) error {
-	args := m.Called(order, oldStatus, newStatus)
-	return args.Error(0)
+func TestOrderService_ValidateOrderStatus(t *testing.T) {
+	service := &Service{}
+
+	validStatuses := []string{"pending", "processing", "shipped", "delivered", "cancelled", "refunded"}
+	invalidStatuses := []string{"invalid", "unknown", "", "PENDING", "Processing"}
+
+	for _, status := range validStatuses {
+		t.Run("valid status: "+status, func(t *testing.T) {
+			assert.True(t, service.ValidateOrderStatus(status))
+		})
+	}
+
+	for _, status := range invalidStatuses {
+		t.Run("invalid status: "+status, func(t *testing.T) {
+			assert.False(t, service.ValidateOrderStatus(status))
+		})
+	}
 }

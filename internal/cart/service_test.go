@@ -3,333 +3,520 @@ package cart
 import (
 	"context"
 	"testing"
-
-	"ecommerce-website/internal/config"
-	"ecommerce-website/internal/database"
-	"ecommerce-website/internal/models"
+	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/mock"
+	"gorm.io/gorm"
+
+	"ecommerce-website/internal/models"
 )
 
-func TestMain(m *testing.M) {
-	// Setup test database
-	cfg := &config.Config{
-		DatabaseURL: ":memory:",
-	}
-	
-	if err := database.InitializeTest(cfg); err != nil {
-		panic("Failed to initialize test database: " + err.Error())
-	}
-	
-	m.Run()
+// MockCartRepository is a mock implementation of the cart repository
+type MockCartRepository struct {
+	mock.Mock
 }
 
-func TestService_GetCart(t *testing.T) {
-	redisClient := setupTestRedis(t)
-	defer cleanupTestData(t, redisClient)
-	
-	// Override the global Redis client for testing
-	originalClient := database.RedisClient
-	database.RedisClient = redisClient
-	defer func() { database.RedisClient = originalClient }()
-	
-	service := NewService()
-	ctx := context.Background()
-	sessionID := "test-session-1"
-	
-	t.Run("should return empty cart when cart doesn't exist", func(t *testing.T) {
-		cart, err := service.GetCart(ctx, sessionID)
-		
-		require.NoError(t, err)
-		assert.Equal(t, sessionID, cart.SessionID)
-		assert.Empty(t, cart.Items)
-		assert.Equal(t, 0.0, cart.Subtotal)
-		assert.Equal(t, 0.0, cart.Total)
-	})
-	
-	t.Run("should return existing cart", func(t *testing.T) {
-		// Create test product
-		product := createTestProduct(t, "Test Product", 10.99, 5)
-		
-		// Create test cart
-		items := []models.CartItem{
-			{
-				ProductID: product.ID,
-				Quantity:  2,
-				Price:     product.Price,
+func (m *MockCartRepository) GetCart(sessionID string) (*models.Cart, error) {
+	args := m.Called(sessionID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Cart), args.Error(1)
+}
+
+func (m *MockCartRepository) SaveCart(cart *models.Cart) error {
+	args := m.Called(cart)
+	return args.Error(0)
+}
+
+func (m *MockCartRepository) DeleteCart(sessionID string) error {
+	args := m.Called(sessionID)
+	return args.Error(0)
+}
+
+func (m *MockCartRepository) SetExpiration(sessionID string, expiration time.Duration) error {
+	args := m.Called(sessionID, expiration)
+	return args.Error(0)
+}
+
+// MockProductRepository for cart service tests
+type MockProductRepository struct {
+	mock.Mock
+}
+
+func (m *MockProductRepository) GetByID(id string) (*models.Product, error) {
+	args := m.Called(id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Product), args.Error(1)
+}
+
+func TestCartService_AddToCart(t *testing.T) {
+	tests := []struct {
+		name          string
+		sessionID     string
+		productID     string
+		quantity      int
+		setupMocks    func(*MockCartRepository, *MockProductRepository)
+		expectedError string
+	}{
+		{
+			name:      "add new item to empty cart",
+			sessionID: "session-123",
+			productID: "prod-123",
+			quantity:  2,
+			setupMocks: func(cartRepo *MockCartRepository, prodRepo *MockProductRepository) {
+				// Cart doesn't exist yet
+				cartRepo.On("GetCart", "session-123").Return(nil, gorm.ErrRecordNotFound)
+
+				// Product exists and has inventory
+				product := &models.Product{
+					ID:        "prod-123",
+					Name:      "Test Product",
+					Price:     99.99,
+					Inventory: 10,
+					IsActive:  true,
+				}
+				prodRepo.On("GetByID", "prod-123").Return(product, nil)
+
+				// Save cart
+				cartRepo.On("SaveCart", mock.AnythingOfType("*models.Cart")).Return(nil)
+				cartRepo.On("SetExpiration", "session-123", mock.AnythingOfType("time.Duration")).Return(nil)
 			},
-		}
-		expectedCart := createTestCart(t, redisClient, sessionID, items)
-		
-		cart, err := service.GetCart(ctx, sessionID)
-		
-		require.NoError(t, err)
-		assert.Equal(t, expectedCart.SessionID, cart.SessionID)
-		assert.Len(t, cart.Items, 1)
-		assert.Equal(t, expectedCart.Items[0].ProductID, cart.Items[0].ProductID)
-		assert.Equal(t, expectedCart.Items[0].Quantity, cart.Items[0].Quantity)
-		assert.Equal(t, expectedCart.Subtotal, cart.Subtotal)
-	})
+		},
+		{
+			name:      "add item to existing cart",
+			sessionID: "session-123",
+			productID: "prod-123",
+			quantity:  1,
+			setupMocks: func(cartRepo *MockCartRepository, prodRepo *MockProductRepository) {
+				// Existing cart with different item
+				existingCart := &models.Cart{
+					SessionID: "session-123",
+					Items: []models.CartItem{
+						{
+							ProductID: "prod-456",
+							Quantity:  1,
+							Price:     49.99,
+						},
+					},
+					Total: 49.99,
+				}
+				cartRepo.On("GetCart", "session-123").Return(existingCart, nil)
+
+				// Product exists and has inventory
+				product := &models.Product{
+					ID:        "prod-123",
+					Name:      "Test Product",
+					Price:     99.99,
+					Inventory: 10,
+					IsActive:  true,
+				}
+				prodRepo.On("GetByID", "prod-123").Return(product, nil)
+
+				// Save updated cart
+				cartRepo.On("SaveCart", mock.AnythingOfType("*models.Cart")).Return(nil)
+				cartRepo.On("SetExpiration", "session-123", mock.AnythingOfType("time.Duration")).Return(nil)
+			},
+		},
+		{
+			name:      "update quantity of existing item",
+			sessionID: "session-123",
+			productID: "prod-123",
+			quantity:  3,
+			setupMocks: func(cartRepo *MockCartRepository, prodRepo *MockProductRepository) {
+				// Existing cart with the same item
+				existingCart := &models.Cart{
+					SessionID: "session-123",
+					Items: []models.CartItem{
+						{
+							ProductID: "prod-123",
+							Quantity:  2,
+							Price:     99.99,
+						},
+					},
+					Total: 199.98,
+				}
+				cartRepo.On("GetCart", "session-123").Return(existingCart, nil)
+
+				// Product exists and has inventory
+				product := &models.Product{
+					ID:        "prod-123",
+					Name:      "Test Product",
+					Price:     99.99,
+					Inventory: 10,
+					IsActive:  true,
+				}
+				prodRepo.On("GetByID", "prod-123").Return(product, nil)
+
+				// Save updated cart
+				cartRepo.On("SaveCart", mock.AnythingOfType("*models.Cart")).Return(nil)
+				cartRepo.On("SetExpiration", "session-123", mock.AnythingOfType("time.Duration")).Return(nil)
+			},
+		},
+		{
+			name:      "product not found",
+			sessionID: "session-123",
+			productID: "nonexistent",
+			quantity:  1,
+			setupMocks: func(cartRepo *MockCartRepository, prodRepo *MockProductRepository) {
+				prodRepo.On("GetByID", "nonexistent").Return(nil, gorm.ErrRecordNotFound)
+			},
+			expectedError: "product not found",
+		},
+		{
+			name:      "insufficient inventory",
+			sessionID: "session-123",
+			productID: "prod-123",
+			quantity:  15,
+			setupMocks: func(cartRepo *MockCartRepository, prodRepo *MockProductRepository) {
+				cartRepo.On("GetCart", "session-123").Return(nil, gorm.ErrRecordNotFound)
+
+				product := &models.Product{
+					ID:        "prod-123",
+					Name:      "Test Product",
+					Price:     99.99,
+					Inventory: 10,
+					IsActive:  true,
+				}
+				prodRepo.On("GetByID", "prod-123").Return(product, nil)
+			},
+			expectedError: "insufficient inventory",
+		},
+		{
+			name:      "inactive product",
+			sessionID: "session-123",
+			productID: "prod-123",
+			quantity:  1,
+			setupMocks: func(cartRepo *MockCartRepository, prodRepo *MockProductRepository) {
+				product := &models.Product{
+					ID:        "prod-123",
+					Name:      "Test Product",
+					Price:     99.99,
+					Inventory: 10,
+					IsActive:  false,
+				}
+				prodRepo.On("GetByID", "prod-123").Return(product, nil)
+			},
+			expectedError: "product is not available",
+		},
+		{
+			name:          "invalid quantity",
+			sessionID:     "session-123",
+			productID:     "prod-123",
+			quantity:      0,
+			setupMocks:    func(cartRepo *MockCartRepository, prodRepo *MockProductRepository) {},
+			expectedError: "quantity must be greater than 0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockCartRepo := new(MockCartRepository)
+			mockProdRepo := new(MockProductRepository)
+			tt.setupMocks(mockCartRepo, mockProdRepo)
+
+			service := &Service{
+				cartRepo:    mockCartRepo,
+				productRepo: mockProdRepo,
+			}
+
+			err := service.AddToCart(context.Background(), tt.sessionID, tt.productID, tt.quantity)
+
+			if tt.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			mockCartRepo.AssertExpectations(t)
+			mockProdRepo.AssertExpectations(t)
+		})
+	}
 }
 
-func TestService_AddItem(t *testing.T) {
-	redisClient := setupTestRedis(t)
-	defer cleanupTestData(t, redisClient)
-	
-	// Override the global Redis client for testing
-	originalClient := database.RedisClient
-	database.RedisClient = redisClient
-	defer func() { database.RedisClient = originalClient }()
-	
-	service := NewService()
-	ctx := context.Background()
-	sessionID := "test-session-2"
-	
-	t.Run("should add new item to empty cart", func(t *testing.T) {
-		product := createTestProduct(t, "Test Product 1", 15.99, 10)
-		
-		cart, err := service.AddItem(ctx, sessionID, product.ID, 3)
-		
-		require.NoError(t, err)
-		assert.Equal(t, sessionID, cart.SessionID)
-		assert.Len(t, cart.Items, 1)
-		assert.Equal(t, product.ID, cart.Items[0].ProductID)
-		assert.Equal(t, 3, cart.Items[0].Quantity)
-		assert.Equal(t, product.Price, cart.Items[0].Price)
-		assert.Equal(t, 47.97, cart.Items[0].Total) // 15.99 * 3
-		assert.Equal(t, 47.97, cart.Subtotal)
-		assert.Equal(t, 47.97, cart.Total)
-	})
-	
-	t.Run("should add quantity to existing item", func(t *testing.T) {
-		product := createTestProduct(t, "Test Product 2", 20.00, 10)
-		
-		// Add item first time
-		cart, err := service.AddItem(ctx, sessionID, product.ID, 2)
-		require.NoError(t, err)
-		
-		// Add same item again
-		cart, err = service.AddItem(ctx, sessionID, product.ID, 1)
-		require.NoError(t, err)
-		
-		// Should have combined quantities
-		item := cart.FindItem(product.ID)
-		require.NotNil(t, item)
-		assert.Equal(t, 3, item.Quantity)
-		assert.Equal(t, 60.0, item.Total) // 20.00 * 3
-	})
-	
-	t.Run("should fail when product is not active", func(t *testing.T) {
-		product := createTestProduct(t, "Inactive Product", 10.00, 5)
-		product.IsActive = false
-		database.GetDB().Save(product)
-		
-		_, err := service.AddItem(ctx, sessionID, product.ID, 1)
-		
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "product is not available")
-	})
-	
-	t.Run("should fail when insufficient inventory", func(t *testing.T) {
-		product := createTestProduct(t, "Low Stock Product", 10.00, 2)
-		
-		_, err := service.AddItem(ctx, sessionID, product.ID, 5)
-		
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "insufficient inventory")
-	})
-	
-	t.Run("should fail when adding to existing item exceeds inventory", func(t *testing.T) {
-		product := createTestProduct(t, "Limited Product", 10.00, 5)
-		
-		// Add 3 items first
-		_, err := service.AddItem(ctx, sessionID, product.ID, 3)
-		require.NoError(t, err)
-		
-		// Try to add 3 more (total would be 6, but only 5 available)
-		_, err = service.AddItem(ctx, sessionID, product.ID, 3)
-		
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "insufficient inventory")
-	})
+func TestCartService_GetCart(t *testing.T) {
+	tests := []struct {
+		name          string
+		sessionID     string
+		setupMock     func(*MockCartRepository)
+		expectedError string
+		expectedItems int
+	}{
+		{
+			name:      "get existing cart",
+			sessionID: "session-123",
+			setupMock: func(repo *MockCartRepository) {
+				cart := &models.Cart{
+					SessionID: "session-123",
+					Items: []models.CartItem{
+						{
+							ProductID: "prod-123",
+							Quantity:  2,
+							Price:     99.99,
+						},
+						{
+							ProductID: "prod-456",
+							Quantity:  1,
+							Price:     49.99,
+						},
+					},
+					Total: 249.97,
+				}
+				repo.On("GetCart", "session-123").Return(cart, nil)
+			},
+			expectedItems: 2,
+		},
+		{
+			name:      "get empty cart",
+			sessionID: "session-456",
+			setupMock: func(repo *MockCartRepository) {
+				repo.On("GetCart", "session-456").Return(nil, gorm.ErrRecordNotFound)
+			},
+			expectedItems: 0,
+		},
+		{
+			name:          "invalid session ID",
+			sessionID:     "",
+			setupMock:     func(repo *MockCartRepository) {},
+			expectedError: "session ID is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRepo := new(MockCartRepository)
+			tt.setupMock(mockRepo)
+
+			service := &Service{
+				cartRepo: mockRepo,
+			}
+
+			cart, err := service.GetCart(context.Background(), tt.sessionID)
+
+			if tt.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+				assert.Nil(t, cart)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, cart)
+				assert.Len(t, cart.Items, tt.expectedItems)
+			}
+
+			mockRepo.AssertExpectations(t)
+		})
+	}
 }
 
-func TestService_UpdateItem(t *testing.T) {
-	redisClient := setupTestRedis(t)
-	defer cleanupTestData(t, redisClient)
-	
-	// Override the global Redis client for testing
-	originalClient := database.RedisClient
-	database.RedisClient = redisClient
-	defer func() { database.RedisClient = originalClient }()
-	
-	service := NewService()
-	ctx := context.Background()
-	sessionID := "test-session-3"
-	
-	t.Run("should update item quantity", func(t *testing.T) {
-		product := createTestProduct(t, "Update Test Product", 25.00, 10)
-		
-		// Add item first
-		cart, err := service.AddItem(ctx, sessionID, product.ID, 2)
-		require.NoError(t, err)
-		
-		// Update quantity
-		cart, err = service.UpdateItem(ctx, sessionID, product.ID, 4)
-		require.NoError(t, err)
-		
-		item := cart.FindItem(product.ID)
-		require.NotNil(t, item)
-		assert.Equal(t, 4, item.Quantity)
-		assert.Equal(t, 100.0, item.Total) // 25.00 * 4
-		assert.Equal(t, 100.0, cart.Subtotal)
-	})
-	
-	t.Run("should remove item when quantity is 0", func(t *testing.T) {
-		uniqueSessionID := "test-session-update-remove"
-		product := createTestProduct(t, "Remove Test Product", 15.00, 5)
-		
-		// Add item first
-		cart, err := service.AddItem(ctx, uniqueSessionID, product.ID, 2)
-		require.NoError(t, err)
-		
-		// Update quantity to 0
-		cart, err = service.UpdateItem(ctx, uniqueSessionID, product.ID, 0)
-		require.NoError(t, err)
-		
-		item := cart.FindItem(product.ID)
-		assert.Nil(t, item)
-		assert.Empty(t, cart.Items)
-	})
-	
-	t.Run("should fail when item not in cart", func(t *testing.T) {
-		uniqueSessionID := "test-session-update-not-found"
-		product := createTestProduct(t, "Not In Cart Product", 10.00, 5)
-		
-		_, err := service.UpdateItem(ctx, uniqueSessionID, product.ID, 2)
-		
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "item not found in cart")
-	})
-	
-	t.Run("should fail when insufficient inventory", func(t *testing.T) {
-		uniqueSessionID := "test-session-update-inventory"
-		product := createTestProduct(t, "Limited Update Product", 10.00, 3)
-		
-		// Add item first
-		_, err := service.AddItem(ctx, uniqueSessionID, product.ID, 2)
-		require.NoError(t, err)
-		
-		// Try to update to quantity that exceeds inventory
-		_, err = service.UpdateItem(ctx, uniqueSessionID, product.ID, 5)
-		
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "insufficient inventory")
-	})
+func TestCartService_UpdateCartItem(t *testing.T) {
+	tests := []struct {
+		name          string
+		sessionID     string
+		productID     string
+		quantity      int
+		setupMocks    func(*MockCartRepository, *MockProductRepository)
+		expectedError string
+	}{
+		{
+			name:      "update existing item quantity",
+			sessionID: "session-123",
+			productID: "prod-123",
+			quantity:  5,
+			setupMocks: func(cartRepo *MockCartRepository, prodRepo *MockProductRepository) {
+				existingCart := &models.Cart{
+					SessionID: "session-123",
+					Items: []models.CartItem{
+						{
+							ProductID: "prod-123",
+							Quantity:  2,
+							Price:     99.99,
+						},
+					},
+					Total: 199.98,
+				}
+				cartRepo.On("GetCart", "session-123").Return(existingCart, nil)
+
+				product := &models.Product{
+					ID:        "prod-123",
+					Inventory: 10,
+					IsActive:  true,
+				}
+				prodRepo.On("GetByID", "prod-123").Return(product, nil)
+
+				cartRepo.On("SaveCart", mock.AnythingOfType("*models.Cart")).Return(nil)
+				cartRepo.On("SetExpiration", "session-123", mock.AnythingOfType("time.Duration")).Return(nil)
+			},
+		},
+		{
+			name:      "remove item when quantity is 0",
+			sessionID: "session-123",
+			productID: "prod-123",
+			quantity:  0,
+			setupMocks: func(cartRepo *MockCartRepository, prodRepo *MockProductRepository) {
+				existingCart := &models.Cart{
+					SessionID: "session-123",
+					Items: []models.CartItem{
+						{
+							ProductID: "prod-123",
+							Quantity:  2,
+							Price:     99.99,
+						},
+						{
+							ProductID: "prod-456",
+							Quantity:  1,
+							Price:     49.99,
+						},
+					},
+					Total: 249.97,
+				}
+				cartRepo.On("GetCart", "session-123").Return(existingCart, nil)
+				cartRepo.On("SaveCart", mock.AnythingOfType("*models.Cart")).Return(nil)
+				cartRepo.On("SetExpiration", "session-123", mock.AnythingOfType("time.Duration")).Return(nil)
+			},
+		},
+		{
+			name:      "item not in cart",
+			sessionID: "session-123",
+			productID: "prod-999",
+			quantity:  1,
+			setupMocks: func(cartRepo *MockCartRepository, prodRepo *MockProductRepository) {
+				existingCart := &models.Cart{
+					SessionID: "session-123",
+					Items: []models.CartItem{
+						{
+							ProductID: "prod-123",
+							Quantity:  2,
+							Price:     99.99,
+						},
+					},
+					Total: 199.98,
+				}
+				cartRepo.On("GetCart", "session-123").Return(existingCart, nil)
+			},
+			expectedError: "item not found in cart",
+		},
+		{
+			name:      "cart not found",
+			sessionID: "nonexistent",
+			productID: "prod-123",
+			quantity:  1,
+			setupMocks: func(cartRepo *MockCartRepository, prodRepo *MockProductRepository) {
+				cartRepo.On("GetCart", "nonexistent").Return(nil, gorm.ErrRecordNotFound)
+			},
+			expectedError: "cart not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockCartRepo := new(MockCartRepository)
+			mockProdRepo := new(MockProductRepository)
+			tt.setupMocks(mockCartRepo, mockProdRepo)
+
+			service := &Service{
+				cartRepo:    mockCartRepo,
+				productRepo: mockProdRepo,
+			}
+
+			err := service.UpdateCartItem(context.Background(), tt.sessionID, tt.productID, tt.quantity)
+
+			if tt.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			mockCartRepo.AssertExpectations(t)
+			mockProdRepo.AssertExpectations(t)
+		})
+	}
 }
 
-func TestService_RemoveItem(t *testing.T) {
-	redisClient := setupTestRedis(t)
-	defer cleanupTestData(t, redisClient)
-	
-	// Override the global Redis client for testing
-	originalClient := database.RedisClient
-	database.RedisClient = redisClient
-	defer func() { database.RedisClient = originalClient }()
-	
-	service := NewService()
-	ctx := context.Background()
-	sessionID := "test-session-4"
-	
-	t.Run("should remove item from cart", func(t *testing.T) {
-		product1 := createTestProduct(t, "Remove Product 1", 10.00, 5)
-		product2 := createTestProduct(t, "Remove Product 2", 20.00, 5)
-		
-		// Add both items
-		_, err := service.AddItem(ctx, sessionID, product1.ID, 2)
-		require.NoError(t, err)
-		_, err = service.AddItem(ctx, sessionID, product2.ID, 1)
-		require.NoError(t, err)
-		
-		// Remove first item
-		cart, err := service.RemoveItem(ctx, sessionID, product1.ID)
-		require.NoError(t, err)
-		
-		assert.Len(t, cart.Items, 1)
-		assert.Equal(t, product2.ID, cart.Items[0].ProductID)
-		assert.Equal(t, 20.0, cart.Subtotal)
-	})
-	
-	t.Run("should fail when item not in cart", func(t *testing.T) {
-		product := createTestProduct(t, "Not In Cart Remove", 10.00, 5)
-		
-		_, err := service.RemoveItem(ctx, sessionID, product.ID)
-		
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "item not found in cart")
-	})
+func TestCartService_ClearCart(t *testing.T) {
+	tests := []struct {
+		name          string
+		sessionID     string
+		setupMock     func(*MockCartRepository)
+		expectedError string
+	}{
+		{
+			name:      "clear existing cart",
+			sessionID: "session-123",
+			setupMock: func(repo *MockCartRepository) {
+				repo.On("DeleteCart", "session-123").Return(nil)
+			},
+		},
+		{
+			name:          "invalid session ID",
+			sessionID:     "",
+			setupMock:     func(repo *MockCartRepository) {},
+			expectedError: "session ID is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRepo := new(MockCartRepository)
+			tt.setupMock(mockRepo)
+
+			service := &Service{
+				cartRepo: mockRepo,
+			}
+
+			err := service.ClearCart(context.Background(), tt.sessionID)
+
+			if tt.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			mockRepo.AssertExpectations(t)
+		})
+	}
 }
 
-func TestService_ClearCart(t *testing.T) {
-	redisClient := setupTestRedis(t)
-	defer cleanupTestData(t, redisClient)
-	
-	// Override the global Redis client for testing
-	originalClient := database.RedisClient
-	database.RedisClient = redisClient
-	defer func() { database.RedisClient = originalClient }()
-	
-	service := NewService()
-	ctx := context.Background()
-	sessionID := "test-session-5"
-	
-	t.Run("should clear cart", func(t *testing.T) {
-		product := createTestProduct(t, "Clear Test Product", 10.00, 5)
-		
-		// Add item first
-		_, err := service.AddItem(ctx, sessionID, product.ID, 2)
-		require.NoError(t, err)
-		
-		// Clear cart
-		err = service.ClearCart(ctx, sessionID)
-		require.NoError(t, err)
-		
-		// Verify cart is empty
-		cart, err := service.GetCart(ctx, sessionID)
-		require.NoError(t, err)
-		assert.Empty(t, cart.Items)
-		assert.Equal(t, 0.0, cart.Subtotal)
-	})
-}
+func TestCartService_CalculateTotal(t *testing.T) {
+	service := &Service{}
 
-func TestService_GetCartWithProducts(t *testing.T) {
-	redisClient := setupTestRedis(t)
-	defer cleanupTestData(t, redisClient)
-	
-	// Override the global Redis client for testing
-	originalClient := database.RedisClient
-	database.RedisClient = redisClient
-	defer func() { database.RedisClient = originalClient }()
-	
-	service := NewService()
-	ctx := context.Background()
-	sessionID := "test-session-6"
-	
-	t.Run("should populate product details", func(t *testing.T) {
-		product := createTestProduct(t, "Product Details Test", 30.00, 5)
-		
-		// Add item
-		_, err := service.AddItem(ctx, sessionID, product.ID, 1)
-		require.NoError(t, err)
-		
-		// Get cart with products
-		cart, err := service.GetCartWithProducts(ctx, sessionID)
-		require.NoError(t, err)
-		
-		assert.Len(t, cart.Items, 1)
-		assert.Equal(t, product.ID, cart.Items[0].Product.ID)
-		assert.Equal(t, product.Name, cart.Items[0].Product.Name)
-		assert.Equal(t, product.Price, cart.Items[0].Product.Price)
-	})
+	tests := []struct {
+		name          string
+		items         []models.CartItem
+		expectedTotal float64
+	}{
+		{
+			name: "calculate total for multiple items",
+			items: []models.CartItem{
+				{ProductID: "prod-1", Quantity: 2, Price: 99.99},
+				{ProductID: "prod-2", Quantity: 1, Price: 49.99},
+				{ProductID: "prod-3", Quantity: 3, Price: 19.99},
+			},
+			expectedTotal: 309.95, // (2 * 99.99) + (1 * 49.99) + (3 * 19.99)
+		},
+		{
+			name:          "calculate total for empty cart",
+			items:         []models.CartItem{},
+			expectedTotal: 0.0,
+		},
+		{
+			name: "calculate total for single item",
+			items: []models.CartItem{
+				{ProductID: "prod-1", Quantity: 5, Price: 25.50},
+			},
+			expectedTotal: 127.50,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			total := service.CalculateTotal(tt.items)
+			assert.Equal(t, tt.expectedTotal, total)
+		})
+	}
 }

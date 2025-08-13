@@ -6,16 +6,22 @@ import (
 	"strings"
 
 	"ecommerce-website/internal/models"
+	"ecommerce-website/internal/search"
 
 	"gorm.io/gorm"
 )
 
 type Service struct {
-	db *gorm.DB
+	db            *gorm.DB
+	searchService *search.Service
 }
 
 func NewService(db *gorm.DB) *Service {
-	return &Service{db: db}
+	searchService := search.NewService(db)
+	return &Service{
+		db:            db,
+		searchService: searchService,
+	}
 }
 
 // ProductFilters represents filters for product queries
@@ -162,11 +168,8 @@ func (s *Service) SearchProducts(query string, pagination PaginationParams) (*Pr
 
 // AdvancedSearchProducts performs advanced search with Elasticsearch integration
 func (s *Service) AdvancedSearchProducts(filters AdvancedSearchFilters, sort AdvancedSearchSort, page, pageSize int, includeFacets bool) (*AdvancedSearchResponse, error) {
-	// This would integrate with the search service
-	// For now, we'll implement a fallback using the existing database search
-
-	// Convert filters to ProductFilters
-	productFilters := ProductFilters{
+	// Convert filters to search.SearchFilters
+	searchFilters := search.SearchFilters{
 		CategoryID: filters.CategoryID,
 		MinPrice:   filters.MinPrice,
 		MaxPrice:   filters.MaxPrice,
@@ -174,41 +177,56 @@ func (s *Service) AdvancedSearchProducts(filters AdvancedSearchFilters, sort Adv
 		Search:     filters.Search,
 	}
 
-	// Convert sort to ProductSort
-	productSort := ProductSort{
+	// Convert sort to search.SearchSort
+	searchSort := search.SearchSort{
 		Field: sort.Field,
 		Order: sort.Order,
 	}
 
-	// Convert pagination
-	pagination := PaginationParams{
-		Page:     page,
-		PageSize: pageSize,
-	}
-
-	// Get products using existing method
-	response, err := s.GetProducts(productFilters, productSort, pagination)
+	// Use search service for advanced search
+	searchResponse, err := s.searchService.SearchProducts(searchFilters, searchSort, page, pageSize, includeFacets)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to perform advanced search: %w", err)
 	}
 
-	// Convert to AdvancedSearchResponse
+	// Convert search.SearchResponse to AdvancedSearchResponse
 	advancedResponse := &AdvancedSearchResponse{
-		Products:   response.Products,
-		Total:      response.Total,
-		Page:       response.Page,
-		PageSize:   response.PageSize,
-		TotalPages: response.TotalPages,
+		Products:   searchResponse.Products,
+		Total:      searchResponse.Total,
+		Page:       searchResponse.Page,
+		PageSize:   searchResponse.PageSize,
+		TotalPages: searchResponse.TotalPages,
 	}
 
-	// Add facets if requested
-	if includeFacets {
-		facets, err := s.buildFacets(productFilters)
-		if err != nil {
-			// Log error but don't fail the request
-			fmt.Printf("Warning: Failed to build facets: %v\n", err)
-		} else {
-			advancedResponse.Facets = facets
+	// Add suggestions if available
+	if searchResponse.Suggestions != nil {
+		advancedResponse.Suggestions = searchResponse.Suggestions
+	}
+
+	// Add facets if available
+	if searchResponse.Facets != nil {
+		advancedResponse.Facets = &SearchFacets{
+			Categories:  make([]CategoryFacet, len(searchResponse.Facets.Categories)),
+			PriceRanges: make([]PriceRangeFacet, len(searchResponse.Facets.PriceRanges)),
+		}
+
+		// Convert category facets
+		for i, cf := range searchResponse.Facets.Categories {
+			advancedResponse.Facets.Categories[i] = CategoryFacet{
+				ID:    cf.ID,
+				Name:  cf.Name,
+				Count: cf.Count,
+			}
+		}
+
+		// Convert price range facets
+		for i, prf := range searchResponse.Facets.PriceRanges {
+			advancedResponse.Facets.PriceRanges[i] = PriceRangeFacet{
+				Range: prf.Range,
+				Min:   prf.Min,
+				Max:   prf.Max,
+				Count: prf.Count,
+			}
 		}
 	}
 
@@ -217,26 +235,7 @@ func (s *Service) AdvancedSearchProducts(filters AdvancedSearchFilters, sort Adv
 
 // GetSearchSuggestions returns search suggestions
 func (s *Service) GetSearchSuggestions(query string, size int) ([]string, error) {
-	if size <= 0 {
-		size = 5
-	}
-
-	var products []models.Product
-	searchTerm := query + "%"
-
-	if err := s.db.Select("name").
-		Where("is_active = ? AND LOWER(name) LIKE LOWER(?)", true, searchTerm).
-		Limit(size).
-		Find(&products).Error; err != nil {
-		return nil, fmt.Errorf("failed to fetch suggestions: %w", err)
-	}
-
-	var suggestions []string
-	for _, product := range products {
-		suggestions = append(suggestions, product.Name)
-	}
-
-	return suggestions, nil
+	return s.searchService.GetSuggestions(query, size)
 }
 
 // buildFacets builds facets for advanced search
@@ -451,6 +450,12 @@ func (s *Service) CreateProduct(req CreateProductRequest) (*models.Product, erro
 		return nil, fmt.Errorf("failed to load created product: %w", err)
 	}
 
+	// Index the product in search service
+	if err := s.searchService.IndexProduct(&product); err != nil {
+		// Log error but don't fail the request
+		fmt.Printf("Warning: Failed to index product in search: %v\n", err)
+	}
+
 	return &product, nil
 }
 
@@ -536,6 +541,12 @@ func (s *Service) UpdateProduct(id string, req UpdateProductRequest) (*models.Pr
 		return nil, fmt.Errorf("failed to load updated product: %w", err)
 	}
 
+	// Re-index the product in search service
+	if err := s.searchService.IndexProduct(&product); err != nil {
+		// Log error but don't fail the request
+		fmt.Printf("Warning: Failed to re-index product in search: %v\n", err)
+	}
+
 	return &product, nil
 }
 
@@ -553,6 +564,12 @@ func (s *Service) DeleteProduct(id string) error {
 	// Soft delete the product
 	if err := s.db.Delete(&product).Error; err != nil {
 		return fmt.Errorf("failed to delete product: %w", err)
+	}
+
+	// Remove the product from search index
+	if err := s.searchService.DeleteProduct(id); err != nil {
+		// Log error but don't fail the request
+		fmt.Printf("Warning: Failed to delete product from search index: %v\n", err)
 	}
 
 	return nil
@@ -577,6 +594,12 @@ func (s *Service) UpdateInventory(id string, inventory int) (*models.Product, er
 	// Load updated product with category
 	if err := s.db.Preload("Category").First(&product, "id = ?", id).Error; err != nil {
 		return nil, fmt.Errorf("failed to load updated product: %w", err)
+	}
+
+	// Re-index the product in search service
+	if err := s.searchService.IndexProduct(&product); err != nil {
+		// Log error but don't fail the request
+		fmt.Printf("Warning: Failed to re-index product in search: %v\n", err)
 	}
 
 	return &product, nil

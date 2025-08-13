@@ -1,0 +1,92 @@
+# Test Configuration for Ecommerce Website
+
+# Database Configuration
+database:
+  test:
+    host: localhost
+    port: 5433
+    name: ecommerce_test
+    user: testuser
+    password: testpass
+    sslmode: disable
+  
+# Redis Configuration
+redis:
+  test:
+    host: localhost
+    port: 6380
+    db: 0
+
+# Elasticsearch Configuration
+elasticsearch:
+  test:
+    host: localhost
+    port: 9201
+    index_prefix: test_
+
+# API Configuration
+api:
+  base_url: http://localhost:8080
+  timeout: 30s
+  
+# Frontend Configuration
+frontend:
+  base_url: http://localhost:3000
+  timeout: 30s
+
+# Test Data Configuration
+test_data:
+  users:
+    admin:
+      email: admin@example.com
+      password: adminpassword123
+      role: admin
+    customer:
+      email: customer@example.com
+      password: customerpassword123
+      role: customer
+    
+  products:
+    - name: Test Laptop
+      sku: TEST-LAP-001
+      price: 999.99
+      inventory: 10
+      category: Electronics
+    - name: Test T-Shirt
+      sku: TEST-TSH-001
+      price: 29.99
+      inventory: 50
+      category: Clothing
+
+  categories:
+    - name: Electronics
+      slug: electronics
+    - name: Clothing
+      slug: clothing
+    - name: Books
+      slug: books
+
+# Test Thresholds
+thresholds:
+  performance:
+    response_time_p95: 500ms
+    error_rate_max: 0.1
+    throughput_min: 100
+  
+  coverage:
+    backend_min: 80
+    frontend_min: 75
+    integration_min: 70
+
+# Test Environment Settings
+environment:
+  cleanup_after_tests: true
+  parallel_execution: true
+  max_retries: 3
+  retry_delay: 1s
+  
+# Logging Configuration
+logging:
+  level: info
+  format: json
+  output: tests/logs/test.log

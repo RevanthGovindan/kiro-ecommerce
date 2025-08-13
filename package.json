@@ -9,9 +9,18 @@
     "generate-client-ts": "npx @openapitools/openapi-generator-cli generate -i api/openapi.yaml -g typescript-axios -o clients/typescript",
     "generate-client-python": "npx @openapitools/openapi-generator-cli generate -i api/openapi.yaml -g python -o clients/python",
     "build": "go build -o bin/server cmd/server/main.go",
-    "test": "go test ./...",
-    "test-users": "go test ./internal/users/... -v",
-    "dev": "go run cmd/server/main.go"
+    "dev": "go run cmd/server/main.go",
+    "test": "./scripts/run-tests.sh all",
+    "test:unit": "./scripts/run-tests.sh unit",
+    "test:integration": "./scripts/run-tests.sh integration",
+    "test:e2e": "./scripts/run-tests.sh e2e",
+    "test:performance": "./scripts/run-tests.sh performance",
+    "test:backend": "go test -v -race -coverprofile=coverage.out ./internal/...",
+    "test:backend:integration": "go test -v -tags=integration ./tests/integration/...",
+    "test:coverage": "go test -v -race -coverprofile=coverage.out ./internal/... && go tool cover -html=coverage.out -o coverage.html",
+    "test:setup": "./scripts/run-tests.sh --setup",
+    "test:cleanup": "./scripts/run-tests.sh --cleanup",
+    "test:ci": "./scripts/run-tests.sh --setup all --cleanup"
   },
   "keywords": [
     "ecommerce",

@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Product, apiClient } from '@/lib/api';
-import { Header } from '@/components/layout/Header';
+
 import { Button } from '@/components/ui/Button';
 
 export default function ProductDetailPage() {
@@ -39,9 +39,7 @@ export default function ProductDetailPage() {
     fetchProduct();
   }, [productId]);
 
-  const handleSearch = (query: string) => {
-    window.location.href = `/products?search=${encodeURIComponent(query)}`;
-  };
+
 
   const handleAddToCart = () => {
     if (!product) return;
@@ -60,7 +58,6 @@ export default function ProductDetailPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Header onSearch={handleSearch} />
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="animate-pulse">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -82,7 +79,6 @@ export default function ProductDetailPage() {
   if (error || !product) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Header onSearch={handleSearch} />
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="text-center py-12">
             <h1 className="text-2xl font-bold text-gray-900 mb-4">
@@ -101,8 +97,6 @@ export default function ProductDetailPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header onSearch={handleSearch} />
-      
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Breadcrumb */}
         <nav className="mb-8">

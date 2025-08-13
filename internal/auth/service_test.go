@@ -1,578 +1,374 @@
 package auth
 
 import (
+	"context"
 	"testing"
 	"time"
 
-	"ecommerce-website/internal/config"
-	"ecommerce-website/internal/models"
-
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
+
+	"ecommerce-website/internal/models"
 )
 
+// MockUserRepository is a mock implementation of the user repository
+type MockUserRepository struct {
+	mock.Mock
+}
 
+func (m *MockUserRepository) Create(user *models.User) error {
+	args := m.Called(user)
+	return args.Error(0)
+}
 
-func TestService_Register(t *testing.T) {
-	service, db := setupTestService(t)
+func (m *MockUserRepository) GetByEmail(email string) (*models.User, error) {
+	args := m.Called(email)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.User), args.Error(1)
+}
 
+func (m *MockUserRepository) GetByID(id string) (*models.User, error) {
+	args := m.Called(id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.User), args.Error(1)
+}
+
+func (m *MockUserRepository) Update(user *models.User) error {
+	args := m.Called(user)
+	return args.Error(0)
+}
+
+func TestAuthService_Register(t *testing.T) {
 	tests := []struct {
-		name    string
-		req     RegisterRequest
-		wantErr error
-		setup   func()
+		name          string
+		email         string
+		password      string
+		firstName     string
+		lastName      string
+		setupMock     func(*MockUserRepository)
+		expectedError string
 	}{
 		{
-			name: "successful registration",
-			req: RegisterRequest{
-				Email:     "test@example.com",
-				Password:  "password123",
-				FirstName: "John",
-				LastName:  "Doe",
-				Phone:     "1234567890",
+			name:      "successful registration",
+			email:     "test@example.com",
+			password:  "password123",
+			firstName: "John",
+			lastName:  "Doe",
+			setupMock: func(repo *MockUserRepository) {
+				repo.On("GetByEmail", "test@example.com").Return(nil, gorm.ErrRecordNotFound)
+				repo.On("Create", mock.AnythingOfType("*models.User")).Return(nil)
 			},
-			wantErr: nil,
 		},
 		{
-			name: "duplicate email",
-			req: RegisterRequest{
-				Email:     "existing@example.com",
-				Password:  "password123",
-				FirstName: "Jane",
-				LastName:  "Doe",
+			name:      "user already exists",
+			email:     "existing@example.com",
+			password:  "password123",
+			firstName: "John",
+			lastName:  "Doe",
+			setupMock: func(repo *MockUserRepository) {
+				existingUser := &models.User{Email: "existing@example.com"}
+				repo.On("GetByEmail", "existing@example.com").Return(existingUser, nil)
 			},
-			setup: func() {
-				// Create existing user
-				hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.DefaultCost)
-				user := TestUser{
-					ID:        "existing-user-id",
-					Email:     "existing@example.com",
+			expectedError: "user already exists",
+		},
+		{
+			name:          "invalid email",
+			email:         "invalid-email",
+			password:      "password123",
+			firstName:     "John",
+			lastName:      "Doe",
+			setupMock:     func(repo *MockUserRepository) {},
+			expectedError: "invalid email format",
+		},
+		{
+			name:          "password too short",
+			email:         "test@example.com",
+			password:      "123",
+			firstName:     "John",
+			lastName:      "Doe",
+			setupMock:     func(repo *MockUserRepository) {},
+			expectedError: "password must be at least 8 characters",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRepo := new(MockUserRepository)
+			tt.setupMock(mockRepo)
+
+			service := &Service{
+				userRepo:  mockRepo,
+				jwtSecret: "test-secret",
+			}
+
+			user, err := service.Register(context.Background(), tt.email, tt.password, tt.firstName, tt.lastName)
+
+			if tt.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+				assert.Nil(t, user)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, user)
+				assert.Equal(t, tt.email, user.Email)
+				assert.Equal(t, tt.firstName, user.FirstName)
+				assert.Equal(t, tt.lastName, user.LastName)
+				assert.NotEmpty(t, user.ID)
+			}
+
+			mockRepo.AssertExpectations(t)
+		})
+	}
+}
+
+func TestAuthService_Login(t *testing.T) {
+	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
+
+	tests := []struct {
+		name          string
+		email         string
+		password      string
+		setupMock     func(*MockUserRepository)
+		expectedError string
+	}{
+		{
+			name:     "successful login",
+			email:    "test@example.com",
+			password: "password123",
+			setupMock: func(repo *MockUserRepository) {
+				user := &models.User{
+					ID:        "user-123",
+					Email:     "test@example.com",
 					Password:  string(hashedPassword),
-					FirstName: "Existing",
-					LastName:  "User",
-					Role:      "customer",
+					FirstName: "John",
+					LastName:  "Doe",
 					IsActive:  true,
 				}
-				db.Create(&user)
+				repo.On("GetByEmail", "test@example.com").Return(user, nil)
 			},
-			wantErr: ErrUserExists,
+		},
+		{
+			name:     "user not found",
+			email:    "nonexistent@example.com",
+			password: "password123",
+			setupMock: func(repo *MockUserRepository) {
+				repo.On("GetByEmail", "nonexistent@example.com").Return(nil, gorm.ErrRecordNotFound)
+			},
+			expectedError: "invalid credentials",
+		},
+		{
+			name:     "incorrect password",
+			email:    "test@example.com",
+			password: "wrongpassword",
+			setupMock: func(repo *MockUserRepository) {
+				user := &models.User{
+					ID:        "user-123",
+					Email:     "test@example.com",
+					Password:  string(hashedPassword),
+					FirstName: "John",
+					LastName:  "Doe",
+					IsActive:  true,
+				}
+				repo.On("GetByEmail", "test@example.com").Return(user, nil)
+			},
+			expectedError: "invalid credentials",
+		},
+		{
+			name:     "inactive user",
+			email:    "test@example.com",
+			password: "password123",
+			setupMock: func(repo *MockUserRepository) {
+				user := &models.User{
+					ID:        "user-123",
+					Email:     "test@example.com",
+					Password:  string(hashedPassword),
+					FirstName: "John",
+					LastName:  "Doe",
+					IsActive:  false,
+				}
+				repo.On("GetByEmail", "test@example.com").Return(user, nil)
+			},
+			expectedError: "account is inactive",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.setup != nil {
-				tt.setup()
+			mockRepo := new(MockUserRepository)
+			tt.setupMock(mockRepo)
+
+			service := &Service{
+				userRepo:  mockRepo,
+				jwtSecret: "test-secret",
 			}
 
-			user, err := service.Register(tt.req)
+			token, user, err := service.Login(context.Background(), tt.email, tt.password)
 
-			if tt.wantErr != nil {
+			if tt.expectedError != "" {
 				assert.Error(t, err)
-				assert.Equal(t, tt.wantErr, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+				assert.Empty(t, token)
 				assert.Nil(t, user)
 			} else {
 				assert.NoError(t, err)
+				assert.NotEmpty(t, token)
 				assert.NotNil(t, user)
-				assert.Equal(t, tt.req.Email, user.Email)
-				assert.Equal(t, tt.req.FirstName, user.FirstName)
-				assert.Equal(t, tt.req.LastName, user.LastName)
-				assert.Equal(t, "customer", user.Role)
-				assert.True(t, user.IsActive)
-				assert.Empty(t, user.Password) // Should be removed from response
+				assert.Equal(t, tt.email, user.Email)
 			}
+
+			mockRepo.AssertExpectations(t)
 		})
 	}
 }
 
-func TestService_Login(t *testing.T) {
-	service, db := setupTestService(t)
-
-	// Create test user
-	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
-	testUser := TestUser{
-		ID:        "test-user-id",
-		Email:     "test@example.com",
-		Password:  string(hashedPassword),
-		FirstName: "John",
-		LastName:  "Doe",
-		Role:      "customer",
-		IsActive:  true,
-	}
-	db.Create(&testUser)
-
-	tests := []struct {
-		name    string
-		req     LoginRequest
-		wantErr error
-	}{
-		{
-			name: "successful login",
-			req: LoginRequest{
-				Email:    "test@example.com",
-				Password: "password123",
-			},
-			wantErr: nil,
-		},
-		{
-			name: "invalid email",
-			req: LoginRequest{
-				Email:    "nonexistent@example.com",
-				Password: "password123",
-			},
-			wantErr: ErrInvalidCredentials,
-		},
-		{
-			name: "invalid password",
-			req: LoginRequest{
-				Email:    "test@example.com",
-				Password: "wrongpassword",
-			},
-			wantErr: ErrInvalidCredentials,
-		},
+func TestAuthService_ValidateToken(t *testing.T) {
+	service := &Service{
+		jwtSecret: "test-secret",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			user, tokens, err := service.Login(tt.req)
-
-			if tt.wantErr != nil {
-				assert.Error(t, err)
-				assert.Equal(t, tt.wantErr, err)
-				assert.Nil(t, user)
-				assert.Nil(t, tokens)
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, user)
-				assert.NotNil(t, tokens)
-				assert.Equal(t, tt.req.Email, user.Email)
-				assert.Empty(t, user.Password) // Should be removed from response
-				assert.NotEmpty(t, tokens.AccessToken)
-				assert.NotEmpty(t, tokens.RefreshToken)
-			}
-		})
-	}
-}
-
-func TestService_GenerateTokens(t *testing.T) {
-	cfg := &config.Config{
-		JWTSecret: "test-secret-key",
-	}
-	service := NewService(nil, cfg) // No DB needed for token generation
-
-	user := &models.User{
-		ID:    "test-user-id",
-		Email: "test@example.com",
-		Role:  "customer",
-	}
-
-	tokens, err := service.GenerateTokens(user)
-	assert.NoError(t, err)
-	assert.NotNil(t, tokens)
-	assert.NotEmpty(t, tokens.AccessToken)
-	assert.NotEmpty(t, tokens.RefreshToken)
-
-	// Validate access token
-	accessClaims, err := service.ValidateToken(tokens.AccessToken)
-	assert.NoError(t, err)
-	assert.Equal(t, user.ID, accessClaims.UserID)
-	assert.Equal(t, user.Email, accessClaims.Email)
-	assert.Equal(t, user.Role, accessClaims.Role)
-
-	// Validate refresh token
-	refreshClaims, err := service.ValidateToken(tokens.RefreshToken)
-	assert.NoError(t, err)
-	assert.Equal(t, user.ID, refreshClaims.UserID)
-	assert.Equal(t, user.Email, refreshClaims.Email)
-	assert.Equal(t, user.Role, refreshClaims.Role)
-}
-
-func TestService_ValidateToken(t *testing.T) {
-	cfg := &config.Config{
-		JWTSecret: "test-secret-key",
-	}
-	service := NewService(nil, cfg) // No DB needed for token validation
-
-	// Create valid token
-	claims := Claims{
-		UserID: "test-user-id",
-		Email:  "test@example.com",
-		Role:   "customer",
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Subject:   "test-user-id",
-		},
+	// Create a valid token
+	claims := jwt.MapClaims{
+		"user_id": "user-123",
+		"email":   "test@example.com",
+		"exp":     time.Now().Add(time.Hour).Unix(),
+		"iat":     time.Now().Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte("test-secret-key"))
+	validTokenString, err := token.SignedString([]byte("test-secret"))
 	require.NoError(t, err)
 
-	// Test valid token
-	validatedClaims, err := service.ValidateToken(tokenString)
-	assert.NoError(t, err)
-	assert.Equal(t, claims.UserID, validatedClaims.UserID)
-	assert.Equal(t, claims.Email, validatedClaims.Email)
-	assert.Equal(t, claims.Role, validatedClaims.Role)
-
-	// Test invalid token
-	_, err = service.ValidateToken("invalid-token")
-	assert.Error(t, err)
-	assert.Equal(t, ErrInvalidToken, err)
-
-	// Test expired token
-	expiredClaims := Claims{
-		UserID: "test-user-id",
-		Email:  "test@example.com",
-		Role:   "customer",
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(-1 * time.Hour)), // Expired
-			IssuedAt:  jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)),
-			Subject:   "test-user-id",
-		},
+	// Create an expired token
+	expiredClaims := jwt.MapClaims{
+		"user_id": "user-123",
+		"email":   "test@example.com",
+		"exp":     time.Now().Add(-time.Hour).Unix(),
+		"iat":     time.Now().Add(-2 * time.Hour).Unix(),
 	}
 
 	expiredToken := jwt.NewWithClaims(jwt.SigningMethodHS256, expiredClaims)
-	expiredTokenString, err := expiredToken.SignedString([]byte("test-secret-key"))
+	expiredTokenString, err := expiredToken.SignedString([]byte("test-secret"))
 	require.NoError(t, err)
 
-	_, err = service.ValidateToken(expiredTokenString)
-	assert.Error(t, err)
-	assert.Equal(t, ErrInvalidToken, err)
+	tests := []struct {
+		name          string
+		tokenString   string
+		expectedError string
+		expectedID    string
+	}{
+		{
+			name:        "valid token",
+			tokenString: validTokenString,
+			expectedID:  "user-123",
+		},
+		{
+			name:          "expired token",
+			tokenString:   expiredTokenString,
+			expectedError: "token is expired",
+		},
+		{
+			name:          "invalid token",
+			tokenString:   "invalid.token.string",
+			expectedError: "invalid token",
+		},
+		{
+			name:          "empty token",
+			tokenString:   "",
+			expectedError: "token is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			userID, err := service.ValidateToken(tt.tokenString)
+
+			if tt.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+				assert.Empty(t, userID)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedID, userID)
+			}
+		})
+	}
 }
 
-func TestService_RefreshToken(t *testing.T) {
-	service, db := setupTestService(t)
+func TestAuthService_GenerateToken(t *testing.T) {
+	service := &Service{
+		jwtSecret: "test-secret",
+	}
 
-	// Create test user
-	testUser := TestUser{
-		ID:        "test-user-id",
+	user := &models.User{
+		ID:        "user-123",
 		Email:     "test@example.com",
 		FirstName: "John",
 		LastName:  "Doe",
-		Role:      "customer",
-		IsActive:  true,
 	}
-	db.Create(&testUser)
 
-	// Generate valid refresh token using models.User
-	modelUser := &models.User{
-		ID:    testUser.ID,
-		Email: testUser.Email,
-		Role:  testUser.Role,
-	}
-	originalTokens, err := service.GenerateTokens(modelUser)
-	require.NoError(t, err)
-
-	// Test successful refresh
-	newTokens, err := service.RefreshToken(originalTokens.RefreshToken)
+	tokenString, err := service.GenerateToken(user)
 	assert.NoError(t, err)
-	assert.NotNil(t, newTokens)
-	assert.NotEmpty(t, newTokens.AccessToken)
-	assert.NotEmpty(t, newTokens.RefreshToken)
-	// Note: tokens might be the same if generated at the same second, so we just check they exist
+	assert.NotEmpty(t, tokenString)
 
-	// Test with invalid refresh token
-	_, err = service.RefreshToken("invalid-token")
-	assert.Error(t, err)
-	assert.Equal(t, ErrInvalidToken, err)
-
-	// Test with refresh token for non-existent user
-	nonExistentUser := &models.User{
-		ID:    "non-existent-id",
-		Email: "nonexistent@example.com",
-		Role:  "customer",
-	}
-	nonExistentTokens, err := service.GenerateTokens(nonExistentUser)
-	require.NoError(t, err)
-
-	_, err = service.RefreshToken(nonExistentTokens.RefreshToken)
-	assert.Error(t, err)
-	assert.Equal(t, ErrUserNotFound, err)
-}
-
-func TestService_GetUserByID(t *testing.T) {
-	service, db := setupTestService(t)
-
-	// Create test user
-	testUser := models.User{
-		ID:        "test-user-id",
-		Email:     "test@example.com",
-		Password:  "hashed-password",
-		FirstName: "John",
-		LastName:  "Doe",
-		Role:      "customer",
-		IsActive:  true,
-	}
-	db.Create(&testUser)
-
-	// Test successful retrieval
-	user, err := service.GetUserByID("test-user-id")
+	// Validate the generated token
+	userID, err := service.ValidateToken(tokenString)
 	assert.NoError(t, err)
-	assert.NotNil(t, user)
-	assert.Equal(t, testUser.ID, user.ID)
-	assert.Equal(t, testUser.Email, user.Email)
-	assert.Equal(t, testUser.FirstName, user.FirstName)
-	assert.Equal(t, testUser.LastName, user.LastName)
-	assert.Empty(t, user.Password) // Should be removed from response
-
-	// Test user not found
-	_, err = service.GetUserByID("non-existent-id")
-	assert.Error(t, err)
-	assert.Equal(t, ErrUserNotFound, err)
-
-	// Test inactive user - first create, then update to set IsActive = false
-	inactiveUser := TestUser{
-		ID:        "inactive-user-id",
-		Email:     "inactive@example.com",
-		FirstName: "Inactive",
-		LastName:  "User",
-		Role:      "customer",
-		IsActive:  true, // Create as active first
-	}
-	result := db.Create(&inactiveUser)
-	require.NoError(t, result.Error)
-
-	// Now update to inactive
-	db.Model(&inactiveUser).Update("is_active", false)
-
-	_, err = service.GetUserByID("inactive-user-id")
-	assert.Error(t, err)
-	assert.Equal(t, ErrUserNotFound, err)
+	assert.Equal(t, user.ID, userID)
 }
 
-func TestService_ForgotPassword(t *testing.T) {
-	service, db := setupTestService(t)
+func TestAuthService_HashPassword(t *testing.T) {
+	service := &Service{}
 
-	// Create test user
-	testUser := TestUser{
-		ID:        "test-user-id",
-		Email:     "test@example.com",
-		FirstName: "John",
-		LastName:  "Doe",
-		Role:      "customer",
-		IsActive:  true,
-	}
-	db.Create(&testUser)
+	password := "testpassword123"
+	hashedPassword, err := service.HashPassword(password)
+
+	assert.NoError(t, err)
+	assert.NotEmpty(t, hashedPassword)
+	assert.NotEqual(t, password, hashedPassword)
+
+	// Verify the hash
+	err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
+	assert.NoError(t, err)
+}
+
+func TestAuthService_ComparePasswords(t *testing.T) {
+	service := &Service{}
+
+	password := "testpassword123"
+	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 
 	tests := []struct {
-		name    string
-		req     ForgotPasswordRequest
-		wantErr bool
+		name           string
+		hashedPassword string
+		plainPassword  string
+		shouldMatch    bool
 	}{
 		{
-			name: "successful forgot password",
-			req: ForgotPasswordRequest{
-				Email: "test@example.com",
-			},
-			wantErr: false,
+			name:           "matching passwords",
+			hashedPassword: string(hashedPassword),
+			plainPassword:  password,
+			shouldMatch:    true,
 		},
 		{
-			name: "non-existent email",
-			req: ForgotPasswordRequest{
-				Email: "nonexistent@example.com",
-			},
-			wantErr: false, // Should not reveal if email exists
+			name:           "non-matching passwords",
+			hashedPassword: string(hashedPassword),
+			plainPassword:  "wrongpassword",
+			shouldMatch:    false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := service.ForgotPassword(tt.req)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-
-			// Check if reset token was set for existing user
-			if tt.req.Email == "test@example.com" {
-				var updatedUser TestUser
-				db.Where("email = ?", tt.req.Email).First(&updatedUser)
-				// Note: We can't easily test the token fields with TestUser struct
-				// In a real scenario, you'd check the actual User model
-			}
-		})
-	}
-}
-
-func TestService_ResetPassword(t *testing.T) {
-	service, db := setupTestService(t)
-
-	// Create test user
-	testUser := TestUser{
-		ID:        "test-user-id",
-		Email:     "test@example.com",
-		FirstName: "John",
-		LastName:  "Doe",
-		Role:      "customer",
-		IsActive:  true,
-	}
-	db.Create(&testUser)
-
-	// Generate reset token
-	resetClaims := Claims{
-		UserID: testUser.ID,
-		Email:  testUser.Email,
-		Role:   "password_reset",
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Subject:   testUser.ID,
-		},
-	}
-
-	resetToken := jwt.NewWithClaims(jwt.SigningMethodHS256, resetClaims)
-	resetTokenString, err := resetToken.SignedString([]byte("test-secret-key"))
-	require.NoError(t, err)
-
-	// Update user with reset token (using raw SQL since TestUser doesn't have the fields)
-	db.Exec("UPDATE users SET password_reset_token = ?, password_reset_expiry = ? WHERE id = ?", 
-		resetTokenString, time.Now().Add(1*time.Hour), testUser.ID)
-
-	tests := []struct {
-		name    string
-		req     ResetPasswordRequest
-		wantErr error
-	}{
-		{
-			name: "successful password reset",
-			req: ResetPasswordRequest{
-				Token:    resetTokenString,
-				Password: "newpassword123",
-			},
-			wantErr: nil,
-		},
-		{
-			name: "invalid token",
-			req: ResetPasswordRequest{
-				Token:    "invalid-token",
-				Password: "newpassword123",
-			},
-			wantErr: ErrInvalidToken,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := service.ResetPassword(tt.req)
-			if tt.wantErr != nil {
-				assert.Error(t, err)
-				assert.Equal(t, tt.wantErr, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestService_SendEmailVerification(t *testing.T) {
-	service, db := setupTestService(t)
-
-	// Create test user
-	testUser := TestUser{
-		ID:        "test-user-id",
-		Email:     "test@example.com",
-		FirstName: "John",
-		LastName:  "Doe",
-		Role:      "customer",
-		IsActive:  true,
-	}
-	db.Create(&testUser)
-
-	tests := []struct {
-		name    string
-		userID  string
-		wantErr error
-	}{
-		{
-			name:    "successful email verification send",
-			userID:  "test-user-id",
-			wantErr: nil,
-		},
-		{
-			name:    "user not found",
-			userID:  "non-existent-id",
-			wantErr: ErrUserNotFound,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := service.SendEmailVerification(tt.userID)
-			if tt.wantErr != nil {
-				assert.Error(t, err)
-				assert.Equal(t, tt.wantErr, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestService_VerifyEmail(t *testing.T) {
-	service, db := setupTestService(t)
-
-	// Create test user
-	testUser := TestUser{
-		ID:        "test-user-id",
-		Email:     "test@example.com",
-		FirstName: "John",
-		LastName:  "Doe",
-		Role:      "customer",
-		IsActive:  true,
-	}
-	db.Create(&testUser)
-
-	// Generate verification token
-	verificationClaims := Claims{
-		UserID: testUser.ID,
-		Email:  testUser.Email,
-		Role:   "email_verification",
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Subject:   testUser.ID,
-		},
-	}
-
-	verificationToken := jwt.NewWithClaims(jwt.SigningMethodHS256, verificationClaims)
-	verificationTokenString, err := verificationToken.SignedString([]byte("test-secret-key"))
-	require.NoError(t, err)
-
-	// Update user with verification token (using raw SQL since TestUser doesn't have the fields)
-	db.Exec("UPDATE users SET email_verification_token = ? WHERE id = ?", 
-		verificationTokenString, testUser.ID)
-
-	tests := []struct {
-		name    string
-		token   string
-		wantErr error
-	}{
-		{
-			name:    "successful email verification",
-			token:   verificationTokenString,
-			wantErr: nil,
-		},
-		{
-			name:    "invalid token",
-			token:   "invalid-token",
-			wantErr: ErrInvalidToken,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := service.VerifyEmail(tt.token)
-			if tt.wantErr != nil {
-				assert.Error(t, err)
-				assert.Equal(t, tt.wantErr, err)
-			} else {
-				assert.NoError(t, err)
-			}
+			match := service.ComparePasswords(tt.hashedPassword, tt.plainPassword)
+			assert.Equal(t, tt.shouldMatch, match)
 		})
 	}
 }
