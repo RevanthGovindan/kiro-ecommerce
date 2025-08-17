@@ -19,16 +19,18 @@ func setupTestRedis(t *testing.T) *redis.Client {
 		Addr: "localhost:6379",
 		DB:   1,
 	})
-	
+
 	// Test connection
 	ctx := context.Background()
 	_, err := client.Ping(ctx).Result()
-	require.NoError(t, err, "Failed to connect to test Redis")
-	
+	if err != nil {
+		t.Skip("Redis is not available, skipping Redis-dependent tests")
+	}
+
 	// Clear test database
 	err = client.FlushDB(ctx).Err()
 	require.NoError(t, err, "Failed to flush test Redis database")
-	
+
 	return client
 }
 
@@ -47,7 +49,7 @@ func createTestProduct(t *testing.T, name string, price float64, inventory int) 
 		err = database.GetDB().Create(category).Error
 		require.NoError(t, err, "Failed to create test category")
 	}
-	
+
 	product := &models.Product{
 		Name:       name,
 		Price:      price,
@@ -56,10 +58,10 @@ func createTestProduct(t *testing.T, name string, price float64, inventory int) 
 		IsActive:   true,
 		CategoryID: category.ID,
 	}
-	
+
 	err = database.GetDB().Create(product).Error
 	require.NoError(t, err, "Failed to create test product")
-	
+
 	return product
 }
 
@@ -70,25 +72,25 @@ func createTestCart(t *testing.T, client *redis.Client, sessionID string, items 
 		Items:     items,
 	}
 	cart.CalculateTotals()
-	
+
 	data, err := json.Marshal(cart)
 	require.NoError(t, err, "Failed to marshal test cart")
-	
+
 	ctx := context.Background()
 	err = client.Set(ctx, cartKeyPrefix+sessionID, data, cartTTL).Err()
 	require.NoError(t, err, "Failed to save test cart to Redis")
-	
+
 	return cart
 }
 
 // cleanupTestData cleans up test data from database and Redis
 func cleanupTestData(t *testing.T, client *redis.Client) {
 	ctx := context.Background()
-	
+
 	// Clear Redis
 	err := client.FlushDB(ctx).Err()
 	require.NoError(t, err, "Failed to flush test Redis database")
-	
+
 	// Clear database tables
 	db := database.GetDB()
 	db.Exec("DELETE FROM order_items")

@@ -122,8 +122,8 @@ func (s *Service) fallbackDatabaseSearch(filters SearchFilters, sort SearchSort,
 	}
 
 	if filters.Search != nil && *filters.Search != "" {
-		searchTerm := "%" + *filters.Search + "%"
-		query = query.Where("LOWER(name) ILIKE ? OR LOWER(description) ILIKE ?", searchTerm, searchTerm)
+		searchTerm := "%" + strings.ToLower(*filters.Search) + "%"
+		query = query.Where("LOWER(name) LIKE ? OR LOWER(description) LIKE ?", searchTerm, searchTerm)
 	}
 
 	// Count total records

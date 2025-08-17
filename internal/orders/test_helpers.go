@@ -67,6 +67,16 @@ func (m *MockCartService) SaveCart(ctx context.Context, cart *models.Cart) error
 	return args.Error(0)
 }
 
+// MockEmailService is a mock implementation of the email service
+type MockEmailService struct {
+	mock.Mock
+}
+
+func (m *MockEmailService) SendOrderStatusUpdate(order *models.Order, oldStatus, newStatus string) error {
+	args := m.Called(order, oldStatus, newStatus)
+	return args.Error(0)
+}
+
 // TestHelpers provides utility functions for testing orders
 type TestHelpers struct {
 	db *gorm.DB

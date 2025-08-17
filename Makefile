@@ -61,6 +61,10 @@ docker-down:
 	@echo "Stopping containers..."
 	docker-compose down
 
+run:
+	@echo "running server"
+	go run ./cmd/server
+
 # Database
 db-migrate:
 	@echo "Running database migrations..."
