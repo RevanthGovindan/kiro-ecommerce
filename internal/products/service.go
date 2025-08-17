@@ -398,6 +398,62 @@ func (s *Service) GetCategoryByID(id string) (*models.Category, error) {
 	return &category, nil
 }
 
+// CreateCategory creates a new category
+func (s *Service) CreateCategory(req CreateCategoryRequest) (*models.Category, error) {
+	// Check if slug already exists
+	var existingCategory models.Category
+	if err := s.db.Where("slug = ?", req.Slug).First(&existingCategory).Error; err == nil {
+		return nil, fmt.Errorf("category with slug already exists")
+	} else if err != gorm.ErrRecordNotFound {
+		return nil, fmt.Errorf("failed to check slug uniqueness: %w", err)
+	}
+
+	// Check if parent category exists (if provided)
+	if req.ParentID != nil {
+		var parentCategory models.Category
+		if err := s.db.Where("id = ? AND is_active = ?", *req.ParentID, true).First(&parentCategory).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil, fmt.Errorf("parent category not found")
+			}
+			return nil, fmt.Errorf("failed to verify parent category: %w", err)
+		}
+	}
+
+	// Set default values
+	isActive := true
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+
+	sortOrder := 0
+	if req.SortOrder != nil {
+		sortOrder = *req.SortOrder
+	}
+
+	// Create category
+	category := models.Category{
+		Name:        req.Name,
+		Slug:        req.Slug,
+		Description: req.Description,
+		ParentID:    req.ParentID,
+		IsActive:    isActive,
+		SortOrder:   sortOrder,
+	}
+
+	if err := s.db.Create(&category).Error; err != nil {
+		return nil, fmt.Errorf("failed to create category: %w", err)
+	}
+
+	// Load the parent relationship if exists
+	if req.ParentID != nil {
+		if err := s.db.Preload("Parent").First(&category, "id = ?", category.ID).Error; err != nil {
+			return nil, fmt.Errorf("failed to load created category: %w", err)
+		}
+	}
+
+	return &category, nil
+}
+
 // Admin Product Management Methods
 
 // CreateProduct creates a new product

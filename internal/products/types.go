@@ -108,3 +108,13 @@ type PriceRangeFacet struct {
 	Max   float64 `json:"max"`
 	Count int64   `json:"count"`
 }
+
+// CreateCategoryRequest represents the request body for creating a category
+type CreateCategoryRequest struct {
+	Name        string  `json:"name" binding:"required"`
+	Slug        string  `json:"slug" binding:"required"`
+	Description *string `json:"description,omitempty"`
+	ParentID    *string `json:"parentId,omitempty"`
+	IsActive    *bool   `json:"isActive,omitempty"`
+	SortOrder   *int    `json:"sortOrder,omitempty"`
+}

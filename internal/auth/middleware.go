@@ -97,3 +97,31 @@ func (s *Service) OptionalAuthMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// RequireRoleMiddleware ensures the user has one of the specified roles
+func (s *Service) RequireRoleMiddleware(allowedRoles ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role, exists := c.Get("user_role")
+		if !exists {
+			utils.ErrorResponse(c, http.StatusUnauthorized, "MISSING_USER_CONTEXT", "User context not found", nil)
+			c.Abort()
+			return
+		}
+
+		userRole := role.(string)
+		for _, allowedRole := range allowedRoles {
+			if userRole == allowedRole {
+				c.Next()
+				return
+			}
+		}
+
+		utils.ErrorResponse(c, http.StatusForbidden, "INSUFFICIENT_PERMISSIONS", "Access denied: insufficient permissions", nil)
+		c.Abort()
+	}
+}
+
+// RequireAdminMiddleware ensures the user has admin role (convenience method)
+func (s *Service) RequireAdminMiddleware() gin.HandlerFunc {
+	return s.RequireRoleMiddleware("admin")
+}

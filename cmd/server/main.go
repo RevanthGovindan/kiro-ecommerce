@@ -165,6 +165,24 @@ func main() {
 	// Setup error handling and monitoring routes
 	errors.SetupRoutes(r, errorHandler, authService)
 
+	// Serve static files in development mode
+	if cfg.Environment == "development" {
+		log.Info("Development mode: serving static files from api/ directory", map[string]interface{}{
+			"static_path": "/api-docs",
+			"files_dir":   "./api",
+		})
+		r.Static("/api-docs", "./api")
+		r.GET("/", func(c *gin.Context) {
+			log.Debug("Root path accessed, redirecting to API documentation")
+			c.Redirect(http.StatusMovedPermanently, "/api-docs/")
+		})
+
+		// Add a specific route for the API documentation
+		r.GET("/docs", func(c *gin.Context) {
+			c.Redirect(http.StatusMovedPermanently, "/api-docs/")
+		})
+	}
+
 	// Setup admin routes with admin rate limiting
 	adminGroup := r.Group("/api/admin")
 	adminGroup.Use(authService.AuthMiddleware())

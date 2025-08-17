@@ -221,3 +221,28 @@ func (h *Handler) ResendEmailVerification(c *gin.Context) {
 		"message": "Verification email has been sent to your email address",
 	})
 }
+
+// AdminLogin handles admin authentication using environment credentials
+func (h *Handler) AdminLogin(c *gin.Context) {
+	var req AdminLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ErrorResponse(c, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid request data", err.Error())
+		return
+	}
+
+	user, tokens, err := h.service.AdminLogin(req)
+	if err != nil {
+		switch err {
+		case ErrInvalidCredentials:
+			utils.ErrorResponse(c, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid admin credentials", nil)
+		default:
+			utils.ErrorResponse(c, http.StatusInternalServerError, "LOGIN_FAILED", "Admin login failed", err.Error())
+		}
+		return
+	}
+
+	utils.SuccessResponse(c, http.StatusOK, "Admin login successful", gin.H{
+		"user":   user,
+		"tokens": tokens,
+	})
+}

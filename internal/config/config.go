@@ -20,6 +20,8 @@ type Config struct {
 	CDNBaseURL     string
 	MaxRequestSize int64
 	Environment    string
+	AdminEmail     string
+	AdminPassword  string
 }
 
 func Load() *Config {
@@ -38,6 +40,8 @@ func Load() *Config {
 		CDNBaseURL:     getEnv("CDN_BASE_URL", ""),
 		MaxRequestSize: getEnvInt64("MAX_REQUEST_SIZE", 10*1024*1024), // 10MB default
 		Environment:    getEnv("ENVIRONMENT", "development"),
+		AdminEmail:     getEnv("ADMIN_EMAIL", "admin@ecommerce.com"),
+		AdminPassword:  getEnv("ADMIN_PASSWORD", "admin123456"),
 	}
 }
 

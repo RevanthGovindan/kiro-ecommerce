@@ -4,8 +4,8 @@ import (
 	"errors"
 	"time"
 
-	"ecommerce-website/internal/models"
 	"ecommerce-website/internal/config"
+	"ecommerce-website/internal/models"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -51,12 +51,17 @@ type ResetPasswordRequest struct {
 	Password string `json:"password" binding:"required,min=8"`
 }
 
+type AdminLoginRequest struct {
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required"`
+}
+
 var (
 	ErrInvalidCredentials = errors.New("invalid email or password")
-	ErrUserExists        = errors.New("user with this email already exists")
-	ErrUserNotFound      = errors.New("user not found")
-	ErrInvalidToken      = errors.New("invalid token")
-	ErrExpiredToken      = errors.New("token has expired")
+	ErrUserExists         = errors.New("user with this email already exists")
+	ErrUserNotFound       = errors.New("user not found")
+	ErrInvalidToken       = errors.New("invalid token")
+	ErrExpiredToken       = errors.New("token has expired")
 )
 
 func NewService(db *gorm.DB, config *config.Config) *Service {
@@ -293,7 +298,7 @@ func (s *Service) ResetPassword(req ResetPasswordRequest) error {
 
 	// Find user and verify reset token
 	var user models.User
-	if err := s.db.Where("id = ? AND is_active = ? AND password_reset_token = ?", 
+	if err := s.db.Where("id = ? AND is_active = ? AND password_reset_token = ?",
 		claims.UserID, true, req.Token).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrInvalidToken
@@ -314,9 +319,9 @@ func (s *Service) ResetPassword(req ResetPasswordRequest) error {
 
 	// Update password and clear reset token
 	if err := s.db.Model(&user).Updates(map[string]interface{}{
-		"password":               string(hashedPassword),
-		"password_reset_token":   nil,
-		"password_reset_expiry":  nil,
+		"password":              string(hashedPassword),
+		"password_reset_token":  nil,
+		"password_reset_expiry": nil,
 	}).Error; err != nil {
 		return err
 	}
@@ -384,7 +389,7 @@ func (s *Service) VerifyEmail(token string) error {
 
 	// Find user and verify token
 	var user models.User
-	if err := s.db.Where("id = ? AND is_active = ? AND email_verification_token = ?", 
+	if err := s.db.Where("id = ? AND is_active = ? AND email_verification_token = ?",
 		claims.UserID, true, token).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrInvalidToken
@@ -401,4 +406,30 @@ func (s *Service) VerifyEmail(token string) error {
 	}
 
 	return nil
+}
+
+// AdminLogin authenticates an admin using environment credentials
+func (s *Service) AdminLogin(req AdminLoginRequest) (*models.User, *TokenPair, error) {
+	// Check against environment credentials
+	if req.Email != s.config.AdminEmail || req.Password != s.config.AdminPassword {
+		return nil, nil, ErrInvalidCredentials
+	}
+
+	// Create a virtual admin user for token generation
+	adminUser := &models.User{
+		ID:        "admin-user",
+		Email:     s.config.AdminEmail,
+		FirstName: "Admin",
+		LastName:  "User",
+		Role:      "admin",
+		IsActive:  true,
+	}
+
+	// Generate tokens
+	tokens, err := s.GenerateTokens(adminUser)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return adminUser, tokens, nil
 }

@@ -231,6 +231,41 @@ func (h *Handler) GetCategoryByID(c *gin.Context) {
 	utils.SuccessResponse(c, http.StatusOK, "Category retrieved successfully", category)
 }
 
+// CreateCategory handles POST /api/categories
+func (h *Handler) CreateCategory(c *gin.Context) {
+	var req CreateCategoryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ErrorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request data", err.Error())
+		return
+	}
+
+	// Validate required fields
+	if req.Name == "" {
+		utils.ErrorResponse(c, http.StatusBadRequest, "MISSING_NAME", "Category name is required", nil)
+		return
+	}
+	if req.Slug == "" {
+		utils.ErrorResponse(c, http.StatusBadRequest, "MISSING_SLUG", "Category slug is required", nil)
+		return
+	}
+
+	category, err := h.service.CreateCategory(req)
+	if err != nil {
+		if err.Error() == "category with slug already exists" {
+			utils.ErrorResponse(c, http.StatusConflict, "CATEGORY_EXISTS", "Category with this slug already exists", nil)
+			return
+		}
+		if err.Error() == "parent category not found" {
+			utils.ErrorResponse(c, http.StatusBadRequest, "PARENT_CATEGORY_NOT_FOUND", "Parent category not found", nil)
+			return
+		}
+		utils.ErrorResponse(c, http.StatusInternalServerError, "CREATE_CATEGORY_ERROR", "Failed to create category", err.Error())
+		return
+	}
+
+	utils.SuccessResponse(c, http.StatusCreated, "Category created successfully", category)
+}
+
 // Admin Product Management Handlers
 
 // CreateProduct handles POST /api/admin/products

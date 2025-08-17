@@ -10,6 +10,7 @@ func SetupRoutes(router *gin.Engine, handler *Handler, authService *Service) {
 	{
 		auth.POST("/register", handler.Register)
 		auth.POST("/login", handler.Login)
+		auth.POST("/admin/login", handler.AdminLogin)
 		auth.POST("/refresh", handler.RefreshToken)
 		auth.POST("/logout", handler.Logout)
 		auth.POST("/forgot-password", handler.ForgotPassword)

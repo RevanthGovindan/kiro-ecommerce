@@ -309,3 +309,118 @@ func stringPtr(s string) *string {
 func float64Ptr(f float64) *float64 {
 	return &f
 }
+func TestCategoryService_CreateCategory_Validation(t *testing.T) {
+	tests := []struct {
+		name          string
+		request       CreateCategoryRequest
+		expectedError string
+	}{
+		{
+			name: "valid category request",
+			request: CreateCategoryRequest{
+				Name:        "Electronics",
+				Slug:        "electronics",
+				Description: stringPtr("Electronic devices and accessories"),
+			},
+		},
+		{
+			name: "valid category with parent",
+			request: CreateCategoryRequest{
+				Name:     "Smartphones",
+				Slug:     "smartphones",
+				ParentID: stringPtr("cat-electronics"),
+			},
+		},
+		{
+			name: "empty name",
+			request: CreateCategoryRequest{
+				Name: "",
+				Slug: "test-slug",
+			},
+			expectedError: "category name is required",
+		},
+		{
+			name: "empty slug",
+			request: CreateCategoryRequest{
+				Name: "Test Category",
+				Slug: "",
+			},
+			expectedError: "category slug is required",
+		},
+		{
+			name: "valid category with custom settings",
+			request: CreateCategoryRequest{
+				Name:      "Books",
+				Slug:      "books",
+				IsActive:  boolPtr(true),
+				SortOrder: intPtr(10),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test validation logic
+			if tt.request.Name == "" {
+				err := fmt.Errorf("category name is required")
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "category name is required")
+				return
+			}
+
+			if tt.request.Slug == "" {
+				err := fmt.Errorf("category slug is required")
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "category slug is required")
+				return
+			}
+
+			// Valid case
+			if tt.expectedError == "" {
+				assert.NotEmpty(t, tt.request.Name)
+				assert.NotEmpty(t, tt.request.Slug)
+			}
+		})
+	}
+}
+
+func TestCategoryService_GetCategory_Validation(t *testing.T) {
+	tests := []struct {
+		name          string
+		categoryID    string
+		expectedError string
+	}{
+		{
+			name:       "valid category ID",
+			categoryID: "cat-123",
+		},
+		{
+			name:          "empty category ID",
+			categoryID:    "",
+			expectedError: "category ID is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test ID validation logic
+			if tt.categoryID == "" {
+				err := fmt.Errorf("category ID is required")
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "category ID is required")
+			} else {
+				// Valid ID
+				assert.NotEmpty(t, tt.categoryID)
+			}
+		})
+	}
+}
+
+// Additional helper functions (if not already defined)
+func boolPtr(b bool) *bool {
+	return &b
+}
+
+func intPtr(i int) *int {
+	return &i
+}

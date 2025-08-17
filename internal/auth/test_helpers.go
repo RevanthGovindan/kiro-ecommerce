@@ -47,7 +47,9 @@ func setupTestDB(t *testing.T) *gorm.DB {
 func setupTestService(t *testing.T) (*Service, *gorm.DB) {
 	db := setupTestDB(t)
 	cfg := &config.Config{
-		JWTSecret: "test-secret-key",
+		JWTSecret:     "test-secret-key",
+		AdminEmail:    "admin@ecommerce.com",
+		AdminPassword: "admin123456",
 	}
 	service := NewService(db, cfg)
 	return service, db

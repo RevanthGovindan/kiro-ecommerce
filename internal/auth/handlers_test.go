@@ -18,8 +18,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-
-
 func TestHandler_Register(t *testing.T) {
 	handler, _ := setupTestHandler(t)
 	gin.SetMode(gin.TestMode)
@@ -245,7 +243,7 @@ func TestHandler_RefreshToken(t *testing.T) {
 			expectedError:  "INVALID_TOKEN",
 		},
 		{
-			name: "missing refresh token",
+			name:        "missing refresh token",
 			requestBody: map[string]string{
 				// Missing refresh_token
 			},
@@ -426,7 +424,7 @@ func TestHandler_ForgotPassword(t *testing.T) {
 			expectedError:  "VALIDATION_ERROR",
 		},
 		{
-			name: "missing email",
+			name:        "missing email",
 			requestBody: map[string]string{
 				// Missing email
 			},
@@ -495,7 +493,7 @@ func TestHandler_ResetPassword(t *testing.T) {
 	require.NoError(t, err)
 
 	// Update user with reset token
-	db.Exec("UPDATE users SET password_reset_token = ?, password_reset_expiry = ? WHERE id = ?", 
+	db.Exec("UPDATE users SET password_reset_token = ?, password_reset_expiry = ? WHERE id = ?",
 		resetTokenString, time.Now().Add(1*time.Hour), testUser.ID)
 
 	tests := []struct {
@@ -600,7 +598,7 @@ func TestHandler_VerifyEmail(t *testing.T) {
 	require.NoError(t, err)
 
 	// Update user with verification token
-	db.Exec("UPDATE users SET email_verification_token = ? WHERE id = ?", 
+	db.Exec("UPDATE users SET email_verification_token = ? WHERE id = ?",
 		verificationTokenString, testUser.ID)
 
 	tests := []struct {
@@ -726,6 +724,103 @@ func TestHandler_ResendEmailVerification(t *testing.T) {
 				assert.Equal(t, tt.expectedError, errorDetail["code"])
 			} else {
 				assert.True(t, response["success"].(bool))
+			}
+		})
+	}
+}
+
+func TestHandler_AdminLogin(t *testing.T) {
+	handler, _ := setupTestHandler(t)
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name           string
+		requestBody    interface{}
+		expectedStatus int
+		expectedError  string
+	}{
+		{
+			name: "successful admin login",
+			requestBody: AdminLoginRequest{
+				Email:    "admin@ecommerce.com",
+				Password: "admin123456",
+			},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name: "invalid admin credentials",
+			requestBody: AdminLoginRequest{
+				Email:    "admin@ecommerce.com",
+				Password: "wrongpassword",
+			},
+			expectedStatus: http.StatusUnauthorized,
+			expectedError:  "INVALID_CREDENTIALS",
+		},
+		{
+			name: "wrong admin email",
+			requestBody: AdminLoginRequest{
+				Email:    "wrong@admin.com",
+				Password: "admin123456",
+			},
+			expectedStatus: http.StatusUnauthorized,
+			expectedError:  "INVALID_CREDENTIALS",
+		},
+		{
+			name: "invalid email format",
+			requestBody: AdminLoginRequest{
+				Email:    "invalid-email",
+				Password: "admin123456",
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "VALIDATION_ERROR",
+		},
+		{
+			name: "missing password",
+			requestBody: AdminLoginRequest{
+				Email:    "admin@ecommerce.com",
+				Password: "",
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "VALIDATION_ERROR",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+
+			body, _ := json.Marshal(tt.requestBody)
+			c.Request = httptest.NewRequest("POST", "/api/auth/admin/login", bytes.NewBuffer(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+
+			handler.AdminLogin(c)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+
+			var response map[string]interface{}
+			err := json.Unmarshal(w.Body.Bytes(), &response)
+			require.NoError(t, err)
+
+			if tt.expectedError != "" {
+				assert.False(t, response["success"].(bool))
+				errorDetail := response["error"].(map[string]interface{})
+				assert.Equal(t, tt.expectedError, errorDetail["code"])
+			} else {
+				assert.True(t, response["success"].(bool))
+
+				// Verify response contains user and tokens
+				data := response["data"].(map[string]interface{})
+				assert.Contains(t, data, "user")
+				assert.Contains(t, data, "tokens")
+
+				user := data["user"].(map[string]interface{})
+				assert.Equal(t, "admin@ecommerce.com", user["email"])
+				assert.Equal(t, "admin", user["role"])
+
+				tokens := data["tokens"].(map[string]interface{})
+				assert.Contains(t, tokens, "access_token")
+				assert.Contains(t, tokens, "refresh_token")
 			}
 		})
 	}

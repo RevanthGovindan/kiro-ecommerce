@@ -699,6 +699,167 @@ func (suite *ProductHandlerTestSuite) TestGetAllProductsAdmin_WithFilters() {
 	assert.Equal(suite.T(), "Active Product", product["name"])
 }
 
+func (suite *ProductHandlerTestSuite) TestCreateCategory_Success() {
+	// Prepare request body
+	reqBody := CreateCategoryRequest{
+		Name:        "Electronics",
+		Slug:        "electronics",
+		Description: stringPtr("Electronic devices and accessories"),
+		IsActive:    boolPtr(true),
+		SortOrder:   intPtr(0),
+	}
+
+	body, _ := json.Marshal(reqBody)
+
+	// Make request
+	req, _ := http.NewRequest("POST", "/api/categories", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+suite.adminToken)
+	w := httptest.NewRecorder()
+	suite.router.ServeHTTP(w, req)
+
+	// Assert response
+	assert.Equal(suite.T(), http.StatusCreated, w.Code)
+
+	var response utils.ApiResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(suite.T(), err)
+	assert.True(suite.T(), response.Success)
+	assert.Equal(suite.T(), "Category created successfully", response.Message)
+
+	// Verify category was created in database
+	var category models.Category
+	err = suite.db.Where("slug = ?", "electronics").First(&category).Error
+	assert.NoError(suite.T(), err)
+	assert.Equal(suite.T(), "Electronics", category.Name)
+	assert.Equal(suite.T(), "electronics", category.Slug)
+	assert.True(suite.T(), category.IsActive)
+}
+
+func (suite *ProductHandlerTestSuite) TestCreateCategory_ValidationError() {
+	// Test missing required fields
+	reqBody := CreateCategoryRequest{
+		Name: "", // Missing name
+		Slug: "test-slug",
+	}
+
+	body, _ := json.Marshal(reqBody)
+
+	// Make request
+	req, _ := http.NewRequest("POST", "/api/categories", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+suite.adminToken)
+	w := httptest.NewRecorder()
+	suite.router.ServeHTTP(w, req)
+
+	// Assert response
+	assert.Equal(suite.T(), http.StatusBadRequest, w.Code)
+
+	var response utils.ApiResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(suite.T(), err)
+	assert.False(suite.T(), response.Success)
+	// Gin's binding validation catches this first
+	assert.Equal(suite.T(), "INVALID_REQUEST", response.Error.Code)
+}
+
+func (suite *ProductHandlerTestSuite) TestCreateCategory_DuplicateSlug() {
+	// Create existing category
+	existingCategory := &models.Category{
+		Name:     "Existing Category",
+		Slug:     "electronics",
+		IsActive: true,
+	}
+	suite.db.Create(existingCategory)
+
+	// Try to create category with same slug
+	reqBody := CreateCategoryRequest{
+		Name: "New Electronics",
+		Slug: "electronics", // Duplicate slug
+	}
+
+	body, _ := json.Marshal(reqBody)
+
+	// Make request
+	req, _ := http.NewRequest("POST", "/api/categories", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+suite.adminToken)
+	w := httptest.NewRecorder()
+	suite.router.ServeHTTP(w, req)
+
+	// Assert response
+	assert.Equal(suite.T(), http.StatusConflict, w.Code)
+
+	var response utils.ApiResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(suite.T(), err)
+	assert.False(suite.T(), response.Success)
+	assert.Equal(suite.T(), "CATEGORY_EXISTS", response.Error.Code)
+}
+
+func (suite *ProductHandlerTestSuite) TestCreateCategory_WithParent() {
+	// Create parent category
+	parentCategory := &models.Category{
+		Name:     "Electronics",
+		Slug:     "electronics",
+		IsActive: true,
+	}
+	suite.db.Create(parentCategory)
+
+	// Create child category
+	reqBody := CreateCategoryRequest{
+		Name:     "Smartphones",
+		Slug:     "smartphones",
+		ParentID: &parentCategory.ID,
+	}
+
+	body, _ := json.Marshal(reqBody)
+
+	// Make request
+	req, _ := http.NewRequest("POST", "/api/categories", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+suite.adminToken)
+	w := httptest.NewRecorder()
+	suite.router.ServeHTTP(w, req)
+
+	// Assert response
+	assert.Equal(suite.T(), http.StatusCreated, w.Code)
+
+	var response utils.ApiResponse
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(suite.T(), err)
+	assert.True(suite.T(), response.Success)
+
+	// Verify category was created with parent
+	var category models.Category
+	err = suite.db.Preload("Parent").Where("slug = ?", "smartphones").First(&category).Error
+	assert.NoError(suite.T(), err)
+	assert.Equal(suite.T(), "Smartphones", category.Name)
+	assert.NotNil(suite.T(), category.Parent)
+	assert.Equal(suite.T(), "Electronics", category.Parent.Name)
+}
+
+func (suite *ProductHandlerTestSuite) TestCreateCategory_Unauthorized() {
+	// Prepare request body
+	reqBody := CreateCategoryRequest{
+		Name: "Test Category",
+		Slug: "test-category",
+	}
+
+	body, _ := json.Marshal(reqBody)
+
+	// Make request without auth token
+	req, _ := http.NewRequest("POST", "/api/categories", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	suite.router.ServeHTTP(w, req)
+
+	// Assert response
+	assert.Equal(suite.T(), http.StatusUnauthorized, w.Code)
+}
+
+// Helper functions for tests (using existing ones from service_test.go)
+
 func TestProductHandlerTestSuite(t *testing.T) {
 	suite.Run(t, new(ProductHandlerTestSuite))
 }

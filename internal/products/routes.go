@@ -23,6 +23,7 @@ func SetupRoutes(router *gin.Engine, handler *Handler, authService *auth.Service
 	{
 		categories.GET("", handler.GetCategories)
 		categories.GET("/:id", handler.GetCategoryByID)
+		categories.POST("", authService.AuthMiddleware(), authService.RequireAdminMiddleware(), handler.CreateCategory)
 	}
 
 	// Admin product routes
