@@ -27,7 +27,7 @@ func DefaultKeyFunc(c *gin.Context) string {
 
 // AuthenticatedUserKeyFunc generates a rate limit key based on user ID if authenticated, otherwise IP
 func AuthenticatedUserKeyFunc(c *gin.Context) string {
-	if userID, exists := c.Get("userID"); exists {
+	if userID, exists := c.Get("user_id"); exists {
 		return fmt.Sprintf("rate_limit:user:%s", userID)
 	}
 	return fmt.Sprintf("rate_limit:ip:%s", c.ClientIP())

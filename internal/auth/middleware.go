@@ -36,9 +36,9 @@ func (s *Service) AuthMiddleware() gin.HandlerFunc {
 		}
 
 		// Set user information in context
-		c.Set("userID", claims.UserID)
-		c.Set("userEmail", claims.Email)
-		c.Set("userRole", claims.Role)
+		c.Set("user_id", claims.UserID)
+		c.Set("user_email", claims.Email)
+		c.Set("user_role", claims.Role)
 		c.Set("claims", claims)
 
 		c.Next()
@@ -48,7 +48,7 @@ func (s *Service) AuthMiddleware() gin.HandlerFunc {
 // AdminMiddleware ensures the user has admin role
 func (s *Service) AdminMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		role, exists := c.Get("userRole")
+		role, exists := c.Get("user_role")
 		if !exists {
 			utils.ErrorResponse(c, http.StatusUnauthorized, "MISSING_USER_CONTEXT", "User context not found", nil)
 			c.Abort()
@@ -89,9 +89,9 @@ func (s *Service) OptionalAuthMiddleware() gin.HandlerFunc {
 		}
 
 		// Set user information in context if token is valid
-		c.Set("userID", claims.UserID)
-		c.Set("userEmail", claims.Email)
-		c.Set("userRole", claims.Role)
+		c.Set("user_id", claims.UserID)
+		c.Set("user_email", claims.Email)
+		c.Set("user_role", claims.Role)
 		c.Set("claims", claims)
 
 		c.Next()

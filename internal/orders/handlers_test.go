@@ -74,7 +74,7 @@ func TestHandler_CreateOrder(t *testing.T) {
 
 	// Setup route with middleware simulation
 	router.POST("/api/orders/create", func(c *gin.Context) {
-		c.Set("userID", "test-user-id")
+		c.Set("user_id", "test-user-id")
 		handler.CreateOrder(c)
 	})
 
@@ -193,8 +193,8 @@ func TestHandler_GetOrder(t *testing.T) {
 
 	// Setup route with middleware simulation
 	router.GET("/api/orders/:id", func(c *gin.Context) {
-		c.Set("userID", "test-user-id")
-		c.Set("userRole", "customer")
+		c.Set("user_id", "test-user-id")
+		c.Set("user_role", "customer")
 		handler.GetOrder(c)
 	})
 
@@ -260,7 +260,7 @@ func TestHandler_GetUserOrders(t *testing.T) {
 
 	// Setup route with middleware simulation
 	router.GET("/api/orders", func(c *gin.Context) {
-		c.Set("userID", "test-user-id")
+		c.Set("user_id", "test-user-id")
 		handler.GetUserOrders(c)
 	})
 
@@ -329,8 +329,8 @@ func TestHandler_UpdateOrderStatus(t *testing.T) {
 
 	// Setup route with middleware simulation (admin)
 	router.PUT("/api/admin/orders/:id/status", func(c *gin.Context) {
-		c.Set("userID", "admin-user-id")
-		c.Set("userRole", "admin")
+		c.Set("user_id", "admin-user-id")
+		c.Set("user_role", "admin")
 		handler.UpdateOrderStatus(c)
 	})
 
@@ -466,8 +466,8 @@ func TestHandler_GetAllOrders(t *testing.T) {
 
 	// Setup route with middleware simulation (admin)
 	router.GET("/api/admin/orders", func(c *gin.Context) {
-		c.Set("userID", "admin-user-id")
-		c.Set("userRole", "admin")
+		c.Set("user_id", "admin-user-id")
+		c.Set("user_role", "admin")
 		handler.GetAllOrders(c)
 	})
 
@@ -544,8 +544,8 @@ func TestHandler_GetAllCustomers(t *testing.T) {
 
 	// Setup route with middleware simulation (admin)
 	router.GET("/api/admin/customers", func(c *gin.Context) {
-		c.Set("userID", "admin-user-id")
-		c.Set("userRole", "admin")
+		c.Set("user_id", "admin-user-id")
+		c.Set("user_role", "admin")
 		handler.GetAllCustomers(c)
 	})
 

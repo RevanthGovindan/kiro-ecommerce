@@ -25,7 +25,7 @@ func NewHandler(service ServiceInterface) *Handler {
 // CreateOrder handles POST /api/orders/create
 func (h *Handler) CreateOrder(c *gin.Context) {
 	// Get user ID from context (set by auth middleware)
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.ErrorResponse(c, http.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated", nil)
 		return
@@ -79,14 +79,14 @@ func (h *Handler) GetOrder(c *gin.Context) {
 	}
 
 	// Get user ID from context
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get("user_id")
 	var userIDStr string
 	if exists {
 		userIDStr = userID.(string)
 	}
 
 	// Check if user is admin
-	userRole, _ := c.Get("userRole")
+	userRole, _ := c.Get("user_role")
 	isAdmin := userRole == "admin"
 
 	// If not admin, must provide user ID for filtering
@@ -117,7 +117,7 @@ func (h *Handler) GetOrder(c *gin.Context) {
 // GetUserOrders handles GET /api/orders (for authenticated users)
 func (h *Handler) GetUserOrders(c *gin.Context) {
 	// Get user ID from context
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.ErrorResponse(c, http.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated", nil)
 		return

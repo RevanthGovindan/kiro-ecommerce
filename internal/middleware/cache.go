@@ -25,7 +25,7 @@ func DefaultCacheKeyFunc(c *gin.Context) string {
 	query := c.Request.URL.RawQuery
 
 	// Include user ID in cache key if authenticated
-	if userID, exists := c.Get("userID"); exists {
+	if userID, exists := c.Get("user_id"); exists {
 		return fmt.Sprintf("cache:user:%s:%s:%s", userID, path, query)
 	}
 
@@ -199,14 +199,14 @@ func CacheInvalidationMiddleware() gin.HandlerFunc {
 
 			// Invalidate user-related caches
 			if contains(path, []string{"/users", "/profile"}) {
-				if userID, exists := c.Get("userID"); exists {
+				if userID, exists := c.Get("user_id"); exists {
 					go InvalidateCache(fmt.Sprintf("cache:user:%s:*", userID))
 				}
 			}
 
 			// Invalidate order-related caches
 			if contains(path, []string{"/orders"}) {
-				if userID, exists := c.Get("userID"); exists {
+				if userID, exists := c.Get("user_id"); exists {
 					go InvalidateCache(fmt.Sprintf("cache:user:%s:/api/orders*", userID))
 					go InvalidateCache(fmt.Sprintf("cache:user:%s:/api/users/orders*", userID))
 				}

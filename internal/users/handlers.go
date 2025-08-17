@@ -20,7 +20,7 @@ func NewHandler(service *Service) *Handler {
 
 // GetProfile handles GET /api/users/profile
 func (h *Handler) GetProfile(c *gin.Context) {
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.ErrorResponse(c, http.StatusUnauthorized, "unauthorized", "User not authenticated", nil)
 		return
@@ -41,7 +41,7 @@ func (h *Handler) GetProfile(c *gin.Context) {
 
 // UpdateProfile handles PUT /api/users/profile
 func (h *Handler) UpdateProfile(c *gin.Context) {
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.ErrorResponse(c, http.StatusUnauthorized, "unauthorized", "User not authenticated", nil)
 		return
@@ -68,7 +68,7 @@ func (h *Handler) UpdateProfile(c *gin.Context) {
 
 // GetOrders handles GET /api/users/orders
 func (h *Handler) GetOrders(c *gin.Context) {
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.ErrorResponse(c, http.StatusUnauthorized, "unauthorized", "User not authenticated", nil)
 		return
@@ -85,7 +85,7 @@ func (h *Handler) GetOrders(c *gin.Context) {
 
 // CreateAddress handles POST /api/users/addresses
 func (h *Handler) CreateAddress(c *gin.Context) {
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.ErrorResponse(c, http.StatusUnauthorized, "unauthorized", "User not authenticated", nil)
 		return
@@ -112,7 +112,7 @@ func (h *Handler) CreateAddress(c *gin.Context) {
 
 // GetAddresses handles GET /api/users/addresses
 func (h *Handler) GetAddresses(c *gin.Context) {
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.ErrorResponse(c, http.StatusUnauthorized, "unauthorized", "User not authenticated", nil)
 		return
@@ -129,7 +129,7 @@ func (h *Handler) GetAddresses(c *gin.Context) {
 
 // GetAddress handles GET /api/users/addresses/:id
 func (h *Handler) GetAddress(c *gin.Context) {
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.ErrorResponse(c, http.StatusUnauthorized, "unauthorized", "User not authenticated", nil)
 		return
@@ -156,7 +156,7 @@ func (h *Handler) GetAddress(c *gin.Context) {
 
 // UpdateAddress handles PUT /api/users/addresses/:id
 func (h *Handler) UpdateAddress(c *gin.Context) {
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.ErrorResponse(c, http.StatusUnauthorized, "unauthorized", "User not authenticated", nil)
 		return
@@ -189,7 +189,7 @@ func (h *Handler) UpdateAddress(c *gin.Context) {
 
 // DeleteAddress handles DELETE /api/users/addresses/:id
 func (h *Handler) DeleteAddress(c *gin.Context) {
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.ErrorResponse(c, http.StatusUnauthorized, "unauthorized", "User not authenticated", nil)
 		return

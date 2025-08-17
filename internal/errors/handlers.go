@@ -46,7 +46,7 @@ func (h *Handler) LogClientError(c *gin.Context) {
 	}
 
 	// Get user ID from context if available
-	if userID, exists := c.Get("userID"); exists {
+	if userID, exists := c.Get("user_id"); exists {
 		req.UserID = userID.(string)
 	}
 

@@ -64,7 +64,7 @@ func (suite *UserHandlerTestSuite) TestGetProfile() {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = req
-	c.Set("userID", user.ID)
+	c.Set("user_id", user.ID)
 
 	suite.handler.GetProfile(c)
 
@@ -113,7 +113,7 @@ func (suite *UserHandlerTestSuite) TestUpdateProfile() {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = req
-	c.Set("userID", user.ID)
+	c.Set("user_id", user.ID)
 
 	suite.handler.UpdateProfile(c)
 
@@ -143,7 +143,7 @@ func (suite *UserHandlerTestSuite) TestUpdateProfileValidationError() {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = req
-	c.Set("userID", user.ID)
+	c.Set("user_id", user.ID)
 
 	suite.handler.UpdateProfile(c)
 
@@ -178,7 +178,7 @@ func (suite *UserHandlerTestSuite) TestGetOrders() {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = req
-	c.Set("userID", user.ID)
+	c.Set("user_id", user.ID)
 
 	suite.handler.GetOrders(c)
 
@@ -214,7 +214,7 @@ func (suite *UserHandlerTestSuite) TestCreateAddress() {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = req
-	c.Set("userID", user.ID)
+	c.Set("user_id", user.ID)
 
 	suite.handler.CreateAddress(c)
 
@@ -245,7 +245,7 @@ func (suite *UserHandlerTestSuite) TestCreateAddressValidationError() {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = req
-	c.Set("userID", user.ID)
+	c.Set("user_id", user.ID)
 
 	suite.handler.CreateAddress(c)
 
@@ -292,7 +292,7 @@ func (suite *UserHandlerTestSuite) TestGetAddresses() {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = req
-	c.Set("userID", user.ID)
+	c.Set("user_id", user.ID)
 
 	suite.handler.GetAddresses(c)
 
@@ -327,7 +327,7 @@ func (suite *UserHandlerTestSuite) TestGetAddress() {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = req
 	c.Params = []gin.Param{{Key: "id", Value: address.ID}}
-	c.Set("userID", user.ID)
+	c.Set("user_id", user.ID)
 
 	suite.handler.GetAddress(c)
 
@@ -377,7 +377,7 @@ func (suite *UserHandlerTestSuite) TestUpdateAddress() {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = req
 	c.Params = []gin.Param{{Key: "id", Value: address.ID}}
-	c.Set("userID", user.ID)
+	c.Set("user_id", user.ID)
 
 	suite.handler.UpdateAddress(c)
 
@@ -413,7 +413,7 @@ func (suite *UserHandlerTestSuite) TestDeleteAddress() {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = req
 	c.Params = []gin.Param{{Key: "id", Value: address.ID}}
-	c.Set("userID", user.ID)
+	c.Set("user_id", user.ID)
 
 	suite.handler.DeleteAddress(c)
 
